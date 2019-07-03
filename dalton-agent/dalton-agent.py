@@ -85,6 +85,7 @@ except Exception as e:
 try:
     DEBUG = config.getboolean('dalton', 'DEBUG')
     STORAGE_PATH = config.get('dalton', 'STORAGE_PATH')
+    CUSTOM_SENSOR_CONFIG = True
     SENSOR_CONFIG = config.get('dalton', 'SENSOR_CONFIG').lower()
     SENSOR_ENGINE = config.get('dalton', 'SENSOR_ENGINE').lower()
     SENSOR_ENGINE_VERSION = config.get('dalton', 'SENSOR_ENGINE_VERSION').lower()
@@ -229,7 +230,19 @@ if SENSOR_ENGINE == "auto":
 if SENSOR_ENGINE_VERSION == "auto":
     SENSOR_ENGINE_VERSION = eng_ver
 if SENSOR_CONFIG == "auto":
-    SENSOR_CONFIG = "%s-%s" % (SENSOR_ENGINE, SENSOR_ENGINE_VERSION)
+    SENSOR_CONFIG = f"{SENSOR_ENGINE}-{SENSOR_ENGINE_VERSION}"
+    CUSTOM_SENSOR_CONFIG = False
+    sensor_config_variable = ""
+else:
+    sensor_config_variable = f"SENSOR_CONFIG={CUSTOM_SENSOR_CONFIG}&"
+
+req_job_url = (f"{DALTON_API}/request_job?"
+               f"SENSOR_ENGINE={SENSOR_ENGINE}&"
+               f"SENSOR_ENGINE_VERSION={SENSOR_ENGINE_VERSION}&"
+               f"SENSOR_UID={SENSOR_UID}&"
+               f"AGENT_VERSION={AGENT_VERSION}&"
+               f"{sensor_config_variable}"
+               f"API_KEY={API_KEY}"
 
 # set/keep for now
 SENSOR_TECHNOLOGY = "%s-%s" % (SENSOR_ENGINE, SENSOR_ENGINE_VERSION)
@@ -274,7 +287,8 @@ JOB_ALERT_DETAILED_LOG = None
 JOB_OTHER_LOGS = None
 JOB_PERFORMANCE_LOG = None
 # end dalton's logs
-# used by snort for logs/alerts
+
+# used by Snort for logs/alerts
 # Suricata puts every log in here
 IDS_LOG_DIRECTORY = None
 TOTAL_PROCESSING_TIME = ''
@@ -315,18 +329,14 @@ def send_update(msg, job_id = None):
         raise Exception("Error in sensor \'%s\' while processing job %s.  Could not communicate with controller in send_update().\nAttempted URL:\n%s" % (SENSOR_UID, job_id, truncated_url))
 
 def request_job():
-    global SENSOR_TECHNOLOGY, DALTON_API, SENSOR_UID, API_KEY, AGENT_VERSION
-
-    url = "%s/request_job/%s/?SENSOR_UID=%s&AGENT_VERSION=%s&apikey=%s" % (DALTON_API, SENSOR_TECHNOLOGY, SENSOR_UID, AGENT_VERSION, API_KEY)
-
     try:
-        data = urllib.request.urlopen(url, timeout=URLLIB_TIMEOUT).read().decode('utf-8')
+        data = urllib.request.urlopen(req_job_url, timeout=URLLIB_TIMEOUT).read().decode('utf-8')
     except Exception as e:
         try:
-            truncated_url = re.search('(^[^\?]*)', url).group(1)
+            truncated_url = re.search('(^[^\?]*)', req_job_url).group(1)
         except:
             truncated_url = "unknown"
-        raise Exception("Error in sensor \'%s\'.  Could not communicate with controller in request_job().\nAttempted URL:\n%s" % (SENSOR_UID, truncated_url))
+        raise Exception(f"Error in sensor 'SENSOR_UID'.  Could not communicate with controller in request_job().\nAttempted URL:\n{truncated_url}")
 
     if (data == 'sleep'):
         #sleep
@@ -336,18 +346,11 @@ def request_job():
         try:
             job = json.loads(data)
         except Exception as e:
-            print_error("Problem loading json from Dalton Controller; could not parse job id from data: '%s'." % data)
+            print_error(f"Problem loading json from Dalton Controller; could not parse job id from data: '{data}'.")
         return job
 
 def request_zip(jid):
-    global DALTON_API
-    global SENSOR_UID
-    global HTTP_HEADERS
-    global STORAGE_PATH
-    global API_KEY
-
-    url = "%s/get_job/%s?apikey=%s" % (DALTON_API, jid, API_KEY)
-
+    url = f"{DALTON_API}/get_job/{jid}?apikey={API_KEY}"
     params = {}
 
     req = urllib.request.Request(url, None, HTTP_HEADERS)
