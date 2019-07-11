@@ -85,7 +85,6 @@ except Exception as e:
 try:
     DEBUG = config.getboolean('dalton', 'DEBUG')
     STORAGE_PATH = config.get('dalton', 'STORAGE_PATH')
-    CUSTOM_SENSOR_CONFIG = True
     SENSOR_CONFIG = config.get('dalton', 'SENSOR_CONFIG').lower()
     SENSOR_ENGINE = config.get('dalton', 'SENSOR_ENGINE').lower()
     SENSOR_ENGINE_VERSION = config.get('dalton', 'SENSOR_ENGINE_VERSION').lower()
@@ -187,7 +186,7 @@ def get_engine_version(path):
 
 AGENT_VERSION = "3.0.0"
 HTTP_HEADERS = {
-    "User-Agent" : "Dalton Agent %s" % AGENT_VERSION
+    "User-Agent" : f"Dalton Agent {AGENT_VERSION}"
 }
 
 # check options from config file
@@ -231,10 +230,9 @@ if SENSOR_ENGINE_VERSION == "auto":
     SENSOR_ENGINE_VERSION = eng_ver
 if SENSOR_CONFIG == "auto":
     SENSOR_CONFIG = f"{SENSOR_ENGINE}-{SENSOR_ENGINE_VERSION}"
-    CUSTOM_SENSOR_CONFIG = False
     sensor_config_variable = ""
 else:
-    sensor_config_variable = f"SENSOR_CONFIG={CUSTOM_SENSOR_CONFIG}&"
+    sensor_config_variable = f"SENSOR_CONFIG={SENSOR_CONFIG}&"
 
 req_job_url = (f"{DALTON_API}/request_job?"
                f"SENSOR_ENGINE={SENSOR_ENGINE}&"
@@ -243,9 +241,7 @@ req_job_url = (f"{DALTON_API}/request_job?"
                f"AGENT_VERSION={AGENT_VERSION}&"
                f"{sensor_config_variable}"
                f"API_KEY={API_KEY}"
-
-# set/keep for now
-SENSOR_TECHNOLOGY = "%s-%s" % (SENSOR_ENGINE, SENSOR_ENGINE_VERSION)
+              )
 
 logger.info("\n*******************")
 logger.info("Starting Dalton Agent version %s:"% AGENT_VERSION)
@@ -311,7 +307,7 @@ def send_update(msg, job_id = None):
     global HTTP_HEADERS
     global API_KEY
 
-    url = "%s/update/?apikey=%s" % (DALTON_API, API_KEY)
+    url = f"{DALTON_API}/update/?apikey={API_KEY}"
 
     params = {}
     params['uid'] = SENSOR_UID
@@ -322,21 +318,19 @@ def send_update(msg, job_id = None):
     try:
         urllib.request.urlopen(req, timeout=URLLIB_TIMEOUT)
     except Exception as e:
-        try:
-            truncated_url = re.search('(^[^\?]*)', url).group(1)
-        except:
-            truncated_url = "unknown"
-        raise Exception("Error in sensor \'%s\' while processing job %s.  Could not communicate with controller in send_update().\nAttempted URL:\n%s" % (SENSOR_UID, job_id, truncated_url))
+        raise Exception(f"Error in sensor '{SENSOR_UID}' while processing job {job_id}. "
+                        "Could not communicate with controller in send_update().\n\tAttempted URL:\n\t"
+                        + re.sub(r'\x26API_KEY=[^\x26]+', "", url)
+                       )
 
 def request_job():
     try:
         data = urllib.request.urlopen(req_job_url, timeout=URLLIB_TIMEOUT).read().decode('utf-8')
     except Exception as e:
-        try:
-            truncated_url = re.search('(^[^\?]*)', req_job_url).group(1)
-        except:
-            truncated_url = "unknown"
-        raise Exception(f"Error in sensor 'SENSOR_UID'.  Could not communicate with controller in request_job().\nAttempted URL:\n{truncated_url}")
+        raise Exception(f"Error in sensor '{SENSOR_UID}'. "
+                        "Could not communicate with controller in request_job().\n\tAttempted URL:\n\t"
+                        + re.sub(r'\x26API_KEY=[^\x26]+', "", req_job_url)
+                       )
 
     if (data == 'sleep'):
         #sleep
@@ -357,13 +351,12 @@ def request_zip(jid):
     try:
         zf = urllib.request.urlopen(req, timeout=URLLIB_TIMEOUT)
     except Exception as e:
-        try:
-            truncated_url = re.search('(^[^\?]*)', url).group(1)
-        except:
-            truncated_url = "unknown"
-        raise Exception("Error in sensor \'%s\' while requesting job %s.  Could not communicate with controller in request_zip().\nAttempted URL:\n%s" % (SENSOR_UID, jid, truncated_url))
+        raise Exception(f"Error in sensor '{SENSOR_UID}'. "
+                         "Could not communicate with controller in request_zip().\n\tAttempted URL:\n\t"
+                         + re.sub(r'\x26API_KEY=[^\x26]+', "", url)
+                       )
 
-    zf_path = "%s/%s.zip" % (STORAGE_PATH, jid)
+    zf_path = f"{STORAGE_PATH}/{jid}.zip"
 
     f = open(zf_path,'wb')
     f.write(zf.read())
@@ -476,7 +469,13 @@ def post_results(json_data):
             truncated_url = re.search('(^[^\?]*)', url).group(1)
         except:
             truncated_url = "unknown"
-        raise Exception("Error in sensor \'%s\' while processing job %s.  Could not communicate with controller in post_results().\nAttempted URL:\n%s\nError:\n%s" % (SENSOR_UID, JOB_ID, truncated_url, e))
+
+        raise Exception(f"Error in sensor '{SENSOR_UID}' while processing job {job_id}"
+                        "Could not communicate with controller in post_results().\n\tAttempted URL:\n\t"
+                        + re.sub(r'\x26API_KEY=[^\x26]+', "", url)
+                        + "\n\tError:\n\t"
+                        + f"{e}"
+                       )
 
 def error_post_results(error_msg):
     global SENSOR_UID
@@ -494,7 +493,6 @@ def error_post_results(error_msg):
     post_results(payload)
 
 def print_error(msg):
-    global JOB_ERROR_LOG, SENSOR_TECHNOLOGY
     if JOB_ERROR_LOG:
         fh = open(JOB_ERROR_LOG, "a")
         fh.write("%s\n" % msg)
@@ -524,7 +522,6 @@ def print_debug(msg):
 
 # process alert output from Snort
 def process_snort_alerts():
-    global IDS_LOG_DIRECTORY, JOB_ALERT_LOG, JOB_ALERT_DETAILED_LOG, SENSOR_TECHNOLOGY
     print_debug("process_snort_alerts() called")
     print_msg("Processing alerts")
     os.system("chmod -R 755 %s" % IDS_LOG_DIRECTORY)
@@ -542,7 +539,6 @@ def check_pcaps():
     Check of the pcaps and alert on potential issues.
     Add other checks here as needed.
     """
-    global PCAP_FILES, TCPDUMP_BINARY, JOB_ALERT_LOG, SENSOR_TECHNOLOGY, JOB_ERROR_LOG
     print_debug("check_pcaps() called")
 
     # Check of the pcaps to make sure none were submitted with TCP packets but no TCP packets have the SYN flag
@@ -651,7 +647,6 @@ def check_pcaps():
 #**** Snort Functions ****
 #*************************
 def run_snort():
-    global IDS_BINARY, IDS_RULES_FILES, IDS_CONFIG_FILE, IDS_LOG_DIRECTORY, JOB_IDS_LOG, PCAP_FILES, SENSOR_TECHNOLOGY
     print_debug("run_snort() called")
     # note: if we don't have '--treat-drop-as-alert' then some alerts in a stream that has already triggered a 'drop' rule won't fire since they are assumed to already blocked by the DAQ
     snort_command = "%s -Q --daq dump --daq-dir /usr/lib/daq/ --daq-var load-mode=read-file --daq-var file=/tmp/inline-out.pcap -l %s -c %s -k none -X --conf-error-out --process-all-events --treat-drop-as-alert --pcap-list=\"%s\" 2>&1" % (IDS_BINARY, IDS_LOG_DIRECTORY, IDS_CONFIG_FILE, ' '.join(PCAP_FILES))
@@ -688,10 +683,9 @@ def run_suricata():
 # generate fast pattern info; this requires a separate Suricata run
 #   with the '--engine-analysis' flag set
 def generate_fast_pattern():
-    global IDS_BINARY, IDS_CONFIG_FILE, IDS_LOG_DIRECTORY, SENSOR_TECHNOLOGY
     print_debug("generate_fast_pattern() called")
     print_msg("Generating Fast Pattern Info")
-    if SENSOR_TECHNOLOGY.startswith('suri'):
+    if SENSOR_ENGINE.startswith('suri'):
         if not IDS_BINARY:
             print_error("No Suricata binary found on system.")
         suricata_command = "%s -c %s -l %s --engine-analysis" % (IDS_BINARY, IDS_CONFIG_FILE, IDS_LOG_DIRECTORY)
@@ -723,7 +717,6 @@ def process_other_logs(other_logs):
     Takes a dictionary of Display Name, filename pairs for logs in the IDS_LOG_DIRECTORY and poulates
     the JOB_OTHER_LOGS with a dictonary containing the Display Name and file contents.
     """
-    global JOB_OTHER_LOGS, IDS_LOG_DIRECTORY, SENSOR_TECHNOLOGY
     print_debug("process_other_logs() called")
     print_msg("Processing other logs")
     if len(other_logs) > 0:
@@ -751,11 +744,7 @@ def process_other_logs(other_logs):
 
 def check_for_errors(tech):
     """ checks the IDS output for error messages """
-    global JOB_ERROR_LOG, JOB_IDS_LOG
     print_debug("check_for_errors() called")
-    if not tech:
-        tech = 'suricata'
-        print_debug("\'tech\' variable not passed to check_for_errors(), using \'%s\'" % tech)
     error_lines = []
     try:
         ids_log_fh = open(JOB_IDS_LOG, "r")
@@ -770,6 +759,8 @@ def check_for_errors(tech):
                     error_lines.append(line)
                     if "unknown file format" in line:
                         error_lines.append("Bad pcap file(s) submitted to Snort. Pcap files should be in libpcap or pcapng format.\n")
+            else:
+                logger.warn(f"Unexpected engine value passed to check_for_errors(): {tech}")
         ids_log_fh.close()
     except Exception as e:
         print_error("Error reading IDS output file \'%s\'. Error:\n\n%s" % (JOB_IDS_LOG, e))
@@ -787,7 +778,6 @@ def check_for_errors(tech):
 # which means bloat.  Mixed part MIME would be better but at least
 # we won't get as much URI encoding bloat as we would if we sent the text from decoded unified2.
 def process_unified2_logs():
-    global IDS_LOG_DIRECTORY, JOB_ALERT_LOG, JOB_ALERT_DETAILED_LOG, SENSOR_TECHNOLOGY
     print_debug("process_unified2_logs() called")
     print_msg("Processing unified2 logs")
 
@@ -828,7 +818,6 @@ def process_unified2_logs():
 
 # process performance output (Snort and Suricata)
 def process_performance_logs():
-    global IDS_LOG_DIRECTORY, JOB_PERFORMANCE_LOG, SENSOR_TECHNOLOGY
     print_debug("process_performance_logs() called")
     print_msg("Processing performance logs")
     os.system("chmod -R 755 %s" % IDS_LOG_DIRECTORY)
@@ -876,7 +865,7 @@ def reset_globals():
 # primary function
 # gets passed directory of submitted files (rules file, pcap file(s)) and job ID
 def submit_job(job_id, job_directory):
-    global JOB_ID, SENSOR_TECHNOLOGY, PCAP_FILES, IDS_RULES_FILES, IDS_CONFIG_FILE, ENGINE_CONF_FILE, JOB_DIRECTORY, JOB_LOG_DIRECTORY, JOB_ERROR_LOG, JOB_IDS_LOG, JOB_DEBUG_LOG, JOB_ALERT_LOG, JOB_ALERT_DETAILED_LOG, JOB_OTHER_LOGS, JOB_PERFORMANCE_LOG, IDS_LOG_DIRECTORY, TOTAL_PROCESSING_TIME, IDS_BINARY
+    global JOB_ID, PCAP_FILES, IDS_RULES_FILES, IDS_CONFIG_FILE, ENGINE_CONF_FILE, JOB_DIRECTORY, JOB_LOG_DIRECTORY, JOB_ERROR_LOG, JOB_IDS_LOG, JOB_DEBUG_LOG, JOB_ALERT_LOG, JOB_ALERT_DETAILED_LOG, JOB_OTHER_LOGS, JOB_PERFORMANCE_LOG, IDS_LOG_DIRECTORY, TOTAL_PROCESSING_TIME, IDS_BINARY
     # reset and populate global vars
     reset_globals()
     (JOB_ID, JOB_DIRECTORY) = (job_id, job_directory)
@@ -904,7 +893,7 @@ def submit_job(job_id, job_directory):
     open(JOB_PERFORMANCE_LOG, "w").close()
 
     print_debug(datetime.datetime.now().strftime("%b %d %Y %H:%M:%S"))
-    print_debug("Agent Name: %s\nAgent Version: %s\nSensor Type: %s\nDalton API: %s" % (SENSOR_UID, AGENT_VERSION, SENSOR_TECHNOLOGY, DALTON_API))
+    print_debug(f"Agent Name: {SENSOR_UID}\nAgent Version: {AGENT_VERSION}\nIDS Engine: {SENSOR_ENGINE} {SENSOR_ENGINE_VERSION}\nDalton API: {DALTON_API}")
 
     print_debug("submit_job() called")
 
@@ -1001,7 +990,7 @@ def submit_job(job_id, job_directory):
     if not JOB_ID:
         print_error("job id not defined")
 
-    if SENSOR_TECHNOLOGY.startswith('snort'):
+    if SENSOR_ENGINE.startswith('snort'):
         snort_conf_fh = open(IDS_CONFIG_FILE, "a")
 
         # include rules in config file
@@ -1019,7 +1008,7 @@ def submit_job(job_id, job_directory):
 
         snort_conf_fh.close()
 
-    if SENSOR_TECHNOLOGY.startswith('suri'):
+    if SENSOR_ENGINE.startswith('suri'):
         # config/YAML should already be built on the controller
         suri_yaml_fh = open(IDS_CONFIG_FILE, "a")
         suri_yaml_fh.write("\n")
@@ -1031,7 +1020,7 @@ def submit_job(job_id, job_directory):
         if len(PCAP_FILES) > 1:
             print_error("Multiple pcap files were submitted to the Dalton Agent for a Suricata job.\n\nSuricata can only read a single pcap file so multiple pcaps submitted to the Dalton Controller should have been combined by the Controller when packaging the job.\n\nIf you see this, something went wrong on the Controller or you are doing something untoward.")
 
-    if SENSOR_TECHNOLOGY.startswith('snort'):
+    if SENSOR_ENGINE.startswith('snort'):
         # this section applies only to Snort sensors
         # Snort uses DAQ dump and pcap read mode
         run_snort()
@@ -1039,7 +1028,7 @@ def submit_job(job_id, job_directory):
         # process snort alerts
         process_snort_alerts()
 
-    elif SENSOR_TECHNOLOGY.startswith('suri'):
+    elif SENSOR_ENGINE.startswith('suri'):
         # this section for Suricata agents
         if getFastPattern:
             generate_fast_pattern()
@@ -1052,7 +1041,7 @@ def submit_job(job_id, job_directory):
 
     # other logs to return from the job; sensor specific
     other_logs = {}
-    if SENSOR_TECHNOLOGY.startswith('suri'):
+    if SENSOR_ENGINE.startswith('suri'):
         # always return Engine and Packet Stats for Suri
         other_logs['Engine Stats'] = 'dalton-stats.log'
         other_logs['Packet Stats'] = 'dalton-packet_stats.log'
@@ -1086,7 +1075,7 @@ def submit_job(job_id, job_directory):
     # handled elsewhere. Applies to Suri and Snort for now
     # calling this last so that everything else is populated
     # and can be sent back even though there could be an error
-    check_for_errors(SENSOR_TECHNOLOGY)
+    check_for_errors(SENSOR_ENGINE)
 
     # check the pcaps to make sure incomplete, truncated, etc. pcaps weren't submitted.
     check_pcaps()
