@@ -461,15 +461,14 @@ def sensor_update():
     return "OK"
 
 
-@dalton_blueprint.route('/dalton/sensor_api/request_job/<sensor_tech>/', methods=['GET'])
+@dalton_blueprint.route('/dalton/sensor_api/request_job', methods=['GET'])
 #@auth_required('read')
-def sensor_request_job(sensor_tech):
+def sensor_request_job():
     """Sensor API. Called when a sensor wants a new job"""
     # job request from Dalton Agent
     global r
     global STAT_CODE_RUNNING
 
-    SENSOR_UID = 'unknown'
     try:
         SENSOR_UID = request.args['SENSOR_UID']
     except Exception as e:
@@ -477,11 +476,22 @@ def sensor_request_job(sensor_tech):
 
     SENSOR_IP = request.remote_addr
 
-    AGENT_VERSION = 'unknown'
     try:
         AGENT_VERSION = request.args['AGENT_VERSION']
     except Exception as e:
         AGENT_VERSION = 'unknown'
+
+    try:
+        SENSOR_ENGINE = request.args['SENSOR_ENGINE']
+    except Exception as e:
+        SENSOR_ENGINE = 'unknown'
+    try:
+        SENSOR_ENGINE_VERSION = request.args['SENSOR_ENGINE_VERSION']
+    except Exception as e:
+        SENSOR_ENGINE_VERSION = 'unknown'
+
+    sensor_tech = f"{SENSOR_ENGINE}-{SENSOR_ENGINE_VERSION}"
+    #TODO: do this different; and store custom config?
 
     # update check-in data; use md5 hash of SENSOR_UID.SENSOR_IP
     # note: sensor keys are expired by function clear_old_agents() which removes the sensor
