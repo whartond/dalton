@@ -23,6 +23,9 @@ Dalton Agent - runs on IDS engine; receives jobs, runs them, and reports results
 # they are. This is especially noticeable (painful?) with the use of urllib2
 # instead of urllib3 or Requests.
 #
+# July 2019 - updated to run on Python 3.8 but many legacy code practices
+# still present.
+#
 
 import os
 import sys
@@ -133,7 +136,7 @@ def find_file(name):
         # file not in PATH, try manually searching
         paths = ['/usr/sbin', '/usr/bin', '/usr/local/bin', '/usr/local/sbin']
         for path in paths:
-            candidate = "%s/%s" % (path, name)
+            candidate = os.path.join(path, name)
             if os.path.exists(candidate):
                 ret_val = candidate
                 break
@@ -152,7 +155,7 @@ def get_engine_version(path):
             output = stderr
         else:
             output = stdout
-        # get engine from out put
+        # get engine from output
         if "Suricata" in output.decode('utf-8'):
             engine = "suricata"
         elif "Snort" in output.decode('utf-8'):
