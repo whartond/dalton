@@ -370,9 +370,6 @@ def hexescape(matchobj):
 
 # send results back to server.  Returns value of 'status' in results dictionary
 def send_results():
-    global DALTON_API, SENSOR_UID, HTTP_HEADERS, API_KEY
-    global JOB_ID, JOB_DIRECTORY, JOB_ERROR_LOG, JOB_IDS_LOG, JOB_DEBUG_LOG, JOB_ALERT_LOG, JOB_ALERT_DETAILED_LOG, JOB_PERFORMANCE_LOG, TOTAL_PROCESSING_TIME, JOB_OTHER_LOGS
-
     print_debug("send_results() called")
     print_msg("Sending back results")
 
@@ -458,7 +455,6 @@ def send_results():
     return results_dict['status']
 
 def post_results(json_data):
-    global DALTON_API, SENSOR_UID, HTTP_HEADERS, API_KEY
     #logger.debug("json_data:\n%s" % json_data)
     url = "%s/results/%s?SENSOR_UID=%s&apikey=%s" % (DALTON_API, JOB_ID, SENSOR_UID, API_KEY)
     req = urllib.request.Request(url, urllib.parse.urlencode(json_data).encode('utf-8'), HTTP_HEADERS)
