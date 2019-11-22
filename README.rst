@@ -652,9 +652,9 @@ provided here but can be easily obtained by making the request in a web browser.
    | Returns the requested configuration file as text.  The 'sensor' value
      is going to be the engine, version, and, if applicable, the custom config
      filename, separated by forward slashes.  For example:
-     `suricata/5.0.0` or 'suricata/5.0.0/mycustomconfig.yaml`.
+     ``suricata/5.0.0`` or ``suricata/5.0.0/mycustomconfig.yaml``.
      Suricata version 4.x compiled with Rust support will have
-     the prefix "rust_" before the version, e.g. `suricata/rust_4.1.5`.
+     the prefix "rust_" before the version, e.g. ``suricata/rust_4.1.5``.
 
    | If no exact match is found for a config file on disk, the closest file
      that matches is returned.
