@@ -88,7 +88,7 @@ except Exception as e:
 try:
     DEBUG = config.getboolean('dalton', 'DEBUG')
     STORAGE_PATH = config.get('dalton', 'STORAGE_PATH')
-    SENSOR_CONFIG = config.get('dalton', 'SENSOR_CONFIG').lower()
+    SENSOR_CONFIG = config.get('dalton', 'SENSOR_CONFIG')
     SENSOR_ENGINE = config.get('dalton', 'SENSOR_ENGINE').lower()
     SENSOR_ENGINE_VERSION = config.get('dalton', 'SENSOR_ENGINE_VERSION').lower()
     SENSOR_UID = config.get('dalton', 'SENSOR_UID')
@@ -235,7 +235,6 @@ if SENSOR_ENGINE == "auto":
 if SENSOR_ENGINE_VERSION == "auto":
     SENSOR_ENGINE_VERSION = eng_ver
 if SENSOR_CONFIG == "auto":
-    SENSOR_CONFIG = f"{SENSOR_ENGINE}-{SENSOR_ENGINE_VERSION}"
     sensor_config_variable = ""
 else:
     sensor_config_variable = f"SENSOR_CONFIG={SENSOR_CONFIG}&"

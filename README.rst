@@ -648,8 +648,13 @@ the ability to pull information from, and perform limited actions on, the Contro
 The following routes can be accessed via HTTP GET requests.  Full examples are not
 provided here but can be easily obtained by making the request in a web browser.
 
--  | **/dalton/controller_api/request_engine_conf/<sensor>**
-   | Returns the requested configuration file as text.
+-  | **/dalton/controller_api/request_engine_conf?sensor=<sensor>**
+   | Returns the requested configuration file as text.  The 'sensor' value
+     is going to be the engine, version, and, if applicable, the custom config
+     filename, separated by forward slashes.  For example:
+     `suricata/5.0.0` or 'suricata/5.0.0/mycustomconfig.yaml`.
+     Suricata version 4.x compiled with Rust support will have
+     the prefix "rust_" before the version, e.g. `suricata/rust_4.1.5`.
 
    | If no exact match is found for a config file on disk, the closest file
      that matches is returned.

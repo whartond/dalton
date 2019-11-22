@@ -170,7 +170,7 @@ supported_engines = ['suricata', 'snort']
 logger.info("Dalton Started.")
 
 
-def prefix_strip(mystring, prefixes=["rust_", "custom_"]):
+def prefix_strip(mystring, prefixes=["rust_"]):
     """ strip passed in prefixes from the beginning of passed in string and return it
     """
     if not isinstance(prefixes, list):
@@ -387,14 +387,17 @@ def page_index():
     return render_template('/dalton/index.html', page='')
 
 
-# this is technically 'controller_api' but supporting 'sensor_api' since
-#  previous versions had that
-@dalton_blueprint.route('/dalton/sensor_api/request_engine_conf/<sensor>', methods=['GET'])
-@dalton_blueprint.route('/dalton/controller_api/request_engine_conf/<sensor>', methods=['GET'])
+# 'sensor' value includes forward slashes so this isn't a RESTful endpoint
+# and 'sensor' value must be passed as a GET parameter
+@dalton_blueprint.route('/dalton/controller_api/request_engine_conf', methods=['GET'])
 #@auth_required()
-def api_get_engine_conf_file(sensor):
+def api_get_engine_conf_file():
     global supported_engines
-    if sensor is None:
+    try:
+        sensor = request.args['sensor']
+    except Exception as e:
+        sensor = None
+    if not sensor or len(sensor) == 0:
         return Response("Invalid 'sensor' supplied.",
                         status=400, mimetype='text/plain', headers = {'X-Dalton-Webapp':'OK'})
     return Response(get_engine_conf_file(sensor), status=200, mimetype='text/plain', headers = {'X-Dalton-Webapp':'OK'})
@@ -407,25 +410,28 @@ def get_engine_conf_file(sensor):
     try:
         conf_file = None
         vars_file = None
-        if sensor.startswith("custom_"):
-            # format (example): custom_suricata-5.0.0-mycustomfilename
-            (engine, version, config) = sensor[7:].split('-', 2)
+        custom_config = None
+        try:
+            # if custom config used
+            # 'sensor' varible format example: suricata/5.0.0/mycustomfilename
+            (engine, version, custom_config) = sensor.split('/', 2)
             epath = os.path.join(CONF_STORAGE_PATH, engine)
-            if os.path.isfile(os.path.join(epath, "%s.yaml" % config)):
-                conf_file = "%s.yaml" % config
-            elif os.path.isfile(os.path.join(epath, "%s.yml" % config)):
-                conf_file = "%s.yml" % config
-            elif os.path.isfile(os.path.join(epath, "%s" % config)):
-                conf_file = "%s" % config
+            if os.path.isfile(os.path.join(epath, "%s" % custom_config)):
+                conf_file = "%s" % custom_config
+            elif os.path.isfile(os.path.join(epath, "%s.yaml" % custom_config)):
+                conf_file = "%s.yaml" % custom_config
+            elif os.path.isfile(os.path.join(epath, "%s.yml" % custom_config)):
+                conf_file = "%s.yml" % custom_config
             if conf_file:
                 conf_file = (os.path.join(epath, conf_file))
                 logger.debug(f"Found custom config file: '{conf_file}'")
             else:
-                logger.error(f"Unable to find custom config file '{config}'")
-                engine_config = f"# Unable to find custom config file '{config}'"
+                logger.error(f"Unable to find custom config file '{custom_config}'")
+                engine_config = f"# Unable to find custom config file '{custom_config}'"
                 return engine_config
-        else:
-            (engine, version) = sensor.split('-', 1)
+        except ValueError:
+            # no custom config
+            (engine, version) = sensor.split('/', 1)
             epath = os.path.join(CONF_STORAGE_PATH, engine)
 
             filelist = [f for f in os.listdir(epath) if os.path.isfile(os.path.join(epath, f))]
@@ -442,6 +448,7 @@ def get_engine_conf_file(sensor):
         engine_config = ''
 
         if conf_file:
+            # TODO: Fix directory traversal vuln here
             # open, read, return
             # Unix newline is \n but for display on web page, \r\n is desired in some
             #  browsers/OSes.  Note: currently not converted back on job submit.
@@ -512,19 +519,17 @@ def sensor_request_job():
     except Exception as e:
         SENSOR_ENGINE_VERSION = 'unknown'
 
-    sensor_tech = f"{SENSOR_ENGINE}-{SENSOR_ENGINE_VERSION}"
-    #TODO: do this different; and store custom config?
+    sensor_tech = f"{SENSOR_ENGINE}/{SENSOR_ENGINE_VERSION}"
+
     SENSOR_CONFIG = None
     if 'SENSOR_CONFIG' in request.args.keys():
         try:
             SENSOR_CONFIG = request.args['SENSOR_CONFIG']
         except Exception as e:
             SENSOR_CONFIG = None
-    if not SENSOR_CONFIG or len(SENSOR_CONFIG) == 0:
-        SENSOR_CONFIG = sensor_tech
 
-    if (SENSOR_CONFIG != sensor_tech):
-        sensor_tech = f"{sensor_tech}-{SENSOR_CONFIG}"
+    if SENSOR_CONFIG and len(SENSOR_CONFIG) > 0:
+        sensor_tech += f"/{SENSOR_CONFIG}"
 
     # update check-in data; use md5 hash of SENSOR_UID.SENSOR_IP
     # note: sensor keys are expired by function clear_old_agents() which removes the sensor
@@ -540,7 +545,6 @@ def sensor_request_job():
     r.set(f"{SENSOR_HASH}-time", datetime.datetime.now().strftime("%b %d %H:%M:%S"))
     r.set(f"{SENSOR_HASH}-epoch", int(time.mktime(time.localtime())))
     r.set(f"{SENSOR_HASH}-tech", sensor_tech)
-    r.set(f"{SENSOR_HASH}-config", SENSOR_CONFIG)
     r.set(f"{SENSOR_HASH}-agent_version", AGENT_VERSION)
 
     #grab a job! If it dosen't exist, return sleep.
@@ -771,7 +775,6 @@ def clear_old_agents():
                 r.delete(f"{sensor}-time")
                 r.delete(f"{sensor}-epoch")
                 r.delete(f"{sensor}-tech")
-                r.delete(f"{sensor}-config")
                 r.delete(f"{sensor}-agent_version")
                 r.srem("sensors", sensor)
 
@@ -863,10 +866,7 @@ def page_coverage_default(sensor_tech, error=None):
         for sensor in r.smembers('sensors'):
             try:
                 tech = r.get("%s-tech" % sensor)
-                config = r.get("%s-config" % sensor)
                 if tech.startswith(sensor_tech):
-                    if tech != config:
-                        tech = f"custom_{tech}"
                     if tech not in sensors:
                         sensors.append(tech)
             except Exception as e:
@@ -876,7 +876,7 @@ def page_coverage_default(sensor_tech, error=None):
             #  rust enabled sensors so adding this extra sort. Can/should probably be removed in year or two.
             sensors.sort(reverse=False)
             # sort by version number; ignore "rust_" prefix
-            sensors.sort(key=lambda v:LooseVersion(prefix_strip(v.split('-', 2)[1], prefixes=["rust_", "custom_"])), reverse=True)
+            sensors.sort(key=lambda v:LooseVersion(prefix_strip(v.split('/', 2)[1], prefixes=["rust_"])), reverse=True)
         except Exception as e:
             try:
                 sensors.sort(key=LooseVersion, reverse=True)
