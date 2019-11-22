@@ -175,10 +175,11 @@ def get_engine_version(path):
         if "suricata" in engine  and version.split('.')[0] == "4":
             process = subprocess.Popen('%s --build-info | grep "Rust support"' % path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
             stdout, stderr = process.communicate()
-            if "yes" in stdout:
+            if "yes" in str(stdout):
                 # rust support exists
                 version = "rust_%s" % version
-    except:
+    except Exception as e:
+        logger.warn("Exception in get_engine_version(): %s" % e)
         pass
     logger.debug("Using IDS binary '%s': engine: '%s', version '%s'" % (path, engine, version))
     return (engine, version)
@@ -201,6 +202,7 @@ TCPDUMP_BINARY = 'auto'
 try:
     TCPDUMP_BINARY = config.get('dalton', 'TCPDUMP_BINARY')
 except Exception as e:
+    logger.warn("Unable to get config value 'TCPDUMP_BINARY': %s" % e)
     pass
 if TCPDUMP_BINARY == 'auto':
     TCPDUMP_BINARY = find_file('tcpdump')
@@ -212,6 +214,7 @@ IDS_BINARY = 'auto'
 try:
     IDS_BINARY = config.get('dalton', 'IDS_BINARY')
 except Exception as e:
+    logger.warn("Unable to get config value 'IDS_BINARY': %s" % e)
     pass
 if IDS_BINARY == 'auto':
     IDS_BINARY = find_file('suricata')

@@ -523,6 +523,9 @@ def sensor_request_job():
     if not SENSOR_CONFIG or len(SENSOR_CONFIG) == 0:
         SENSOR_CONFIG = sensor_tech
 
+    if (SENSOR_CONFIG != sensor_tech):
+        sensor_tech = f"{sensor_tech}-{SENSOR_CONFIG}"
+
     # update check-in data; use md5 hash of SENSOR_UID.SENSOR_IP
     # note: sensor keys are expired by function clear_old_agents() which removes the sensor
     # when it has not checked in in <x> amount of time (expire time configurable via
@@ -863,7 +866,7 @@ def page_coverage_default(sensor_tech, error=None):
                 config = r.get("%s-config" % sensor)
                 if tech.startswith(sensor_tech):
                     if tech != config:
-                        tech = f"custom_{tech}-{config}"
+                        tech = f"custom_{tech}"
                     if tech not in sensors:
                         sensors.append(tech)
             except Exception as e:

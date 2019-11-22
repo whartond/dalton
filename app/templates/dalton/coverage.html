@@ -21,9 +21,15 @@
             if (mysplit[1].startsWith("rust_")) {
                 newstr += mysplit[1].slice(5,);
                 if (mysplit.length > 2) {
-                    newstr += '-' + mysplit.slice(2,).join('-');
+                    if (custom == 1) {
+                        newstr += " (" + mysplit.slice(2,).join('-') + " - with Rust support)";
+                    } else {
+                        newstr += '-' + mysplit.slice(2,).join('-');
+                        newstr += " (with Rust support)";
+                    }
+                } else {
+                    newstr += " (with Rust support)";
                 }
-                newstr += " (with Rust support)";
             } else if (custom == 1) {
                 newstr += mysplit[1] + ' (' + mysplit.slice(2,).join('-') + ")";
             } else {
@@ -167,7 +173,11 @@
                     {% if sensor|length > 1 %}
                         {% if sensor[0].startswith("custom_") %}
                             {{sensor[0][7:]|title}}
-                            {{sensor[1]}} ({{sensor[2:]|join('-')}})
+                            {% if sensor[1].startswith("rust_") %}
+                                {{sensor[1][5:]}} ({{sensor[2:]|join('-')}} - with Rust support)
+                            {% else %}
+                                {{sensor[1]}} ({{sensor[2:]|join('-')}})
+                            {% endif %}
                         {% else %}
                             {{sensor[0]|title}}
                             {% if sensor[1].startswith("rust_") %}
@@ -224,7 +234,11 @@
                                             {% set tlist = sensor.split('-') %}
                                             {% if tlist|length > 1 %}
                                                 {% if tlist[0].startswith("custom_") %}
-                                                    {{tlist[1]}} ({{tlist[2:]|join('-')}})
+                                                    {% if tlist[1].startswith("rust_") %}
+                                                        {{tlist[1][5:]}} ({{tlist[2:]|join('-')}} - with Rust support)
+                                                    {% else %}
+                                                        {{tlist[1]}} ({{tlist[2:]|join('-')}})
+                                                    {%endif %}
                                                 {% elif tlist[1].startswith("rust_") %}
                                                     {{tlist[1][5:]}}{% if tlist|length > 2 %}-{{tlist[2:]|join('-')}}{% endif %} (with Rust support)
                                                 {% else %}
