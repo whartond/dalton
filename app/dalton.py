@@ -169,6 +169,10 @@ supported_engines = ['suricata', 'snort']
 
 logger.info("Dalton Started.")
 
+""" returns normalized path; used to help prevent directory traversal """
+def clean_path(mypath):
+    return os.path.normpath('/' + mypath).lstrip('/')
+
 
 def prefix_strip(mystring, prefixes=["rust_"]):
     """ strip passed in prefixes from the beginning of passed in string and return it
@@ -226,7 +230,7 @@ def get_rulesets(engine=''):
     if not re.match(r"^[a-zA-Z0-9\_\-\.]*$", engine):
         logger.error("Invalid engine value '%s' in get_rulesets()" % engine)
         return ruleset_list
-    ruleset_dir = os.path.join(RULESET_STORAGE_PATH, engine)
+    ruleset_dir = os.path.join(RULESET_STORAGE_PATH, clean_path(engine))
     if not os.path.isdir(ruleset_dir):
         logger.error("Could not find ruleset directory '%s'" % ruleset_dir)
         return ruleset_list
@@ -242,7 +246,7 @@ def get_rulesets(engine=''):
     ruleset_list.sort(reverse=True)
 
     # return 2D array with base and full path
-    return [[file, os.path.join(ruleset_dir, file)] for file in ruleset_list] 
+    return [[file, os.path.join(ruleset_dir, file)] for file in ruleset_list]
 
 def set_job_status_msg(jobid, msg):
     """set a job's status message """
@@ -415,7 +419,7 @@ def get_engine_conf_file(sensor):
             # if custom config used
             # 'sensor' varible format example: suricata/5.0.0/mycustomfilename
             (engine, version, custom_config) = sensor.split('/', 2)
-            epath = os.path.join(CONF_STORAGE_PATH, engine)
+            epath = os.path.join(CONF_STORAGE_PATH, clean_path(engine))
             if os.path.isfile(os.path.join(epath, "%s" % custom_config)):
                 conf_file = "%s" % custom_config
             elif os.path.isfile(os.path.join(epath, "%s.yaml" % custom_config)):
@@ -423,7 +427,7 @@ def get_engine_conf_file(sensor):
             elif os.path.isfile(os.path.join(epath, "%s.yml" % custom_config)):
                 conf_file = "%s.yml" % custom_config
             if conf_file:
-                conf_file = (os.path.join(epath, conf_file))
+                conf_file = (os.path.join(epath, clean_path(conf_file)))
                 logger.debug(f"Found custom config file: '{conf_file}'")
             else:
                 logger.error(f"Unable to find custom config file '{custom_config}'")
@@ -432,7 +436,7 @@ def get_engine_conf_file(sensor):
         except ValueError:
             # no custom config
             (engine, version) = sensor.split('/', 1)
-            epath = os.path.join(CONF_STORAGE_PATH, engine)
+            epath = os.path.join(CONF_STORAGE_PATH, clean_path(engine))
 
             filelist = [f for f in os.listdir(epath) if os.path.isfile(os.path.join(epath, f))]
             # assumes an extension (e.g. '.yaml', '.conf') on engine config files
@@ -448,7 +452,6 @@ def get_engine_conf_file(sensor):
         engine_config = ''
 
         if conf_file:
-            # TODO: Fix directory traversal vuln here
             # open, read, return
             # Unix newline is \n but for display on web page, \r\n is desired in some
             #  browsers/OSes.  Note: currently not converted back on job submit.
@@ -834,7 +837,7 @@ def page_coverage_default(sensor_tech, error=None):
     global r
     ruleset_dirs = []
     sensor_tech = sensor_tech.split('-')[0]
-    conf_dir = os.path.join(CONF_STORAGE_PATH, sensor_tech)
+    conf_dir = os.path.join(CONF_STORAGE_PATH, clean_path(sensor_tech))
     if sensor_tech is None:
         return render_template('/dalton/error.html', jid='', msg=["No Sensor technology selected for job."])
     elif not re.match(r"^[a-zA-Z0-9\_\-\.]+$", sensor_tech):
