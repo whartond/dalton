@@ -436,16 +436,18 @@ def get_engine_conf_file(sensor):
         except ValueError:
             # no custom config
             (engine, version) = sensor.split('/', 1)
+            version = prefix_strip(version, prefixes="rust_")
+            sensor2 = f"{engine}-{version}"
             epath = os.path.join(CONF_STORAGE_PATH, clean_path(engine))
 
             filelist = [f for f in os.listdir(epath) if os.path.isfile(os.path.join(epath, f))]
             # assumes an extension (e.g. '.yaml', '.conf') on engine config files
             # if exact match, just use that instead of relying on LooseVersion
-            files = [f for f in filelist if os.path.splitext(f)[0] == sensor]
+            files = [f for f in filelist if os.path.splitext(f)[0] == sensor2]
             if len(files) == 0:
-                files = [f for f in filelist if LooseVersion(prefix_strip(os.path.splitext(f)[0], prefixes="rust_")) <= LooseVersion(sensor)]
+                files = [f for f in filelist if LooseVersion(os.path.splitext(f)[0]) <= LooseVersion(sensor2)]
             if len(files) > 0:
-                files.sort(key=lambda v:LooseVersion(prefix_strip(os.path.splitext(v)[0], prefixes="rust_")), reverse=True)
+                files.sort(key=lambda v:LooseVersion(os.path.splitext(v)[0]), reverse=True)
                 conf_file = os.path.join(epath, files[0])
             logger.debug("in get_engine_conf_file(): passed sensor value: '%s', conf file used: '%s'", sensor, os.path.basename(conf_file))
 
@@ -454,7 +456,7 @@ def get_engine_conf_file(sensor):
         if conf_file:
             # open, read, return
             # Unix newline is \n but for display on web page, \r\n is desired in some
-            #  browsers/OSes.  Note: currently not converted back on job submit.
+            # browsers/OSes.  Note: currently not converted back on job submit.
             with open(conf_file, 'r') as fh:
                 # want to parse each line so put it in to a list
                 contents = fh.readlines()
@@ -1977,7 +1979,7 @@ def controller_api_get_current_sensors(engine):
 
     # sort so highest version number is first; ignore "rust_" prefix
     try:
-        sensors.sort(key=lambda v:LooseVersion(prefix_strip(v.split('-', 1)[1], prefixes="rust_")), reverse=True)
+        sensors.sort(key=lambda v:LooseVersion(prefix_strip(v.split('/', 1)[1], prefixes="rust_")), reverse=True)
     except Exception as e:
         try:
             sensors.sort(key=LooseVersion, reverse=True)

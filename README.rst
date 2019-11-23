@@ -649,7 +649,7 @@ The following routes can be accessed via HTTP GET requests.  Full examples are n
 provided here but can be easily obtained by making the request in a web browser.
 
 -  | **/dalton/controller_api/request_engine_conf?sensor=<sensor>**
-   | Returns the requested configuration file as text.  The 'sensor' value
+   | Returns the requested configuration file as text.  The <sensor> value
      is going to be the engine, version, and, if applicable, the custom config
      filename, separated by forward slashes.  For example:
      ``suricata/5.0.0`` or ``suricata/5.0.0/mycustomconfig.yaml``.
@@ -658,8 +658,6 @@ provided here but can be easily obtained by making the request in a web browser.
 
    | If no exact match is found for a config file on disk, the closest file
      that matches is returned.
-
-   | <sensor> is the sensor technology, e.g. ``suricata-4.0.``
 
 -  | **/dalton/controller_api/delete-old-job-files**
    | Deletes old job files from disk. Returns the number of
