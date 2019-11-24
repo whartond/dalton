@@ -38,12 +38,7 @@ import datetime
 import glob
 import shutil
 import base64
-try:
-    # for Python v2.6
-    import json
-except ImportError:
-    # for Python versions < v2.6
-    import simplejson as json
+import json
 import subprocess
 import zipfile
 import configparser
@@ -75,14 +70,14 @@ config = configparser.SafeConfigParser()
 
 if not os.path.exists(dalton_config_file):
     # just print to stdout; logging hasn't started yet
-    print("Config file \'%s' does not exist.\n\nexiting." % dalton_config_file)
+    print(f"Config file '{dalton_config_file}' does not exist.\n\nexiting.")
     sys.exit(1)
 
 try:
     config.read(dalton_config_file)
 except Exception as e:
     # just print to stdout; logging hasn't started yet
-    print("Error reading config file, \'%s\'.\n\nexiting." % dalton_config_file)
+    print(f"Error reading config file, '{dalton_config_file}'.\n\nexiting.")
     sys.exit(1)
 
 try:
@@ -98,7 +93,7 @@ try:
     KEEP_JOB_FILES = config.getboolean('dalton', 'KEEP_JOB_FILES')
 except Exception as e:
     # just print to stdout; logging hasn't started yet
-    print("Error parsing config file, \'%s\':\n\n%s\n\nexiting." % (dalton_config_file, e))
+    print(f"Error parsing config file, '{dalton_config_file}':\n\n{e}\n\nexiting.")
     sys.exit(1)
 
 #***************
@@ -171,7 +166,6 @@ def get_engine_version(path):
             version = result.group('version')
 
         # if Suricata version 4, see if Rust is enabled and add to version string
-        # TODO: change for Dalton2
         if "suricata" in engine  and version.split('.')[0] == "4":
             process = subprocess.Popen('%s --build-info | grep "Rust support"' % path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
             stdout, stderr = process.communicate()
@@ -190,7 +184,7 @@ def get_engine_version(path):
 
 AGENT_VERSION = "3.0.0"
 HTTP_HEADERS = {
-    "User-Agent" : f"Dalton Agent {AGENT_VERSION}"
+    "User-Agent" : f"Dalton Agent/{AGENT_VERSION}"
 }
 
 # check options from config file
