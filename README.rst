@@ -931,7 +931,7 @@ A Suricata or Snort machine can be turned into a Dalton Agent fairly easily.
 Requirements:
 
 -  Engine (Suricata or Snort)
--  Python
+-  Python 3.6 or later
 -  ``dalton-agent.py``
 -  ``dalton-agent.conf``
 
