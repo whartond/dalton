@@ -426,6 +426,8 @@ def get_engine_conf_file(sensor):
                 conf_file = "%s.yaml" % custom_config
             elif os.path.isfile(os.path.join(epath, "%s.yml" % custom_config)):
                 conf_file = "%s.yml" % custom_config
+            elif os.path.isfile(os.path.join(epath, "%s.conf" % custom_config)):
+                conf_file = "%s.conf" % custom_config
             if conf_file:
                 conf_file = (os.path.join(epath, clean_path(conf_file)))
                 logger.debug(f"Found custom config file: '{conf_file}'")
