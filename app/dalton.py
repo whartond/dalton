@@ -296,6 +296,7 @@ def set_keys_timeout(jobid):
         r.expire("%s-time" % jobid, EXPIRE_VALUE)
         r.expire("%s-alert_detailed" % jobid, EXPIRE_VALUE)
         r.expire("%s-other_logs" % jobid, EXPIRE_VALUE)
+        r.expire("%s-eve" % jobid, EXPIRE_VALUE)
         r.expire("%s-teapotjob" % jobid, EXPIRE_VALUE)
     except:
         pass
@@ -307,7 +308,7 @@ def expire_all_keys(jid):
     #   efficient for large key sets so we are deleting each one individually
     global r
     logger.debug("Dalton calling expire_all_keys() on job %s" % jid)
-    keys_to_delete = ["ids", "perf", "alert", "alert_detailed", "other_logs", "error", "debug", "time", "statcode", "status", "start_time", "user", "tech", "submission_time", "teapotjob"]
+    keys_to_delete = ["ids", "perf", "alert", "alert_detailed", "other_logs", "eve", "error", "debug", "time", "statcode", "status", "start_time", "user", "tech", "submission_time", "teapotjob"]
     try:
         for cur_key in keys_to_delete:
             r.delete("%s-%s" % (jid, cur_key))
@@ -693,11 +694,19 @@ def post_job_results(jobid):
             alert_detailed = ""
     else:
         alert_detailed = ""
+
     # other_logs only supported on Suricata for now
     if "other_logs" in result_obj:
         other_logs = result_obj['other_logs']
     else:
         other_logs = ""
+
+    # EVE is Suricata only
+    if "eve" in result_obj:
+        eve = result_obj['eve']
+    else:
+        eve = ""
+
 
     r.set("%s-ids" % jobid, ids)
     r.set("%s-perf" % jobid, perf)
@@ -707,6 +716,7 @@ def post_job_results(jobid):
     r.set("%s-time" % jobid, time)
     r.set("%s-alert_detailed" % jobid, alert_detailed)
     r.set("%s-other_logs" % jobid, other_logs)
+    r.set("%s-eve" % jobid, eve)
     set_keys_timeout(jobid)
 
     if error:
@@ -950,6 +960,10 @@ def page_show_job(jid):
             # if <jid>-other_logs is empty then error, "No JSON object could be decoded" will be thrown so just handling it cleanly
             other_logs = ""
             #logger.error("could not load json other_logs:\n%s\n\nvalue:\n%s" % (e,r.get("%s-other_logs" % jid)))
+        try:
+            eve = json.loads(r.get(f"{jid}-eve"))
+        except Exception as e:
+            eve = ""
 
         # parse out custom rules option and pass it?
         custom_rules = False
@@ -967,7 +981,7 @@ def page_show_job(jid):
         else:
             overview['status'] = 'Error'
 
-        return render_template('/dalton/job.html', overview=overview,page = '', jobid = jid, ids=ids, perf=perf, alert=alert, error=error, debug=debug, total_time=total_time, tech=tech, custom_rules=custom_rules, alert_detailed=alert_detailed, other_logs=other_logs)
+        return render_template('/dalton/job.html', overview=overview,page = '', jobid = jid, ids=ids, perf=perf, alert=alert, error=error, debug=debug, total_time=total_time, tech=tech, custom_rules=custom_rules, alert_detailed=alert_detailed, other_logs=other_logs, eve=eve)
 
 # sanitize passed in filename (string) and make it POSIX (fully portable)
 def clean_filename(filename):
@@ -1929,7 +1943,7 @@ def page_about_default():
 def controller_api_get_request(jid, requested_data):
     global r
     # add to as necessary
-    valid_keys = ('alert', 'alert_detailed', 'ids', 'other_logs', 'perf', 'tech', 'error', 'time', 'statcode', 'debug', 'status', 'submission_time', 'start_time', 'user', 'all')
+    valid_keys = ('alert', 'alert_detailed', 'ids', 'other_logs', 'eve', 'perf', 'tech', 'error', 'time', 'statcode', 'debug', 'status', 'submission_time', 'start_time', 'user', 'all')
     json_response = {'error':False, 'error_msg':None, 'data':None}
     # some input validation
     if not validate_jobid(jid):
