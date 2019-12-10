@@ -961,8 +961,9 @@ def page_show_job(jid):
             other_logs = ""
             #logger.error("could not load json other_logs:\n%s\n\nvalue:\n%s" % (e,r.get("%s-other_logs" % jid)))
         try:
-            eve = json.loads(r.get(f"{jid}-eve"))
+            eve = r.get(f"{jid}-eve")
         except Exception as e:
+            #logger.debug(f"Problem getting {jid}-eve log:\n{e}") 
             eve = ""
 
         # parse out custom rules option and pass it?
@@ -981,7 +982,12 @@ def page_show_job(jid):
         else:
             overview['status'] = 'Error'
 
-        return render_template('/dalton/job.html', overview=overview,page = '', jobid = jid, ids=ids, perf=perf, alert=alert, error=error, debug=debug, total_time=total_time, tech=tech, custom_rules=custom_rules, alert_detailed=alert_detailed, other_logs=other_logs, eve=eve)
+        return render_template('/dalton/job.html', overview=overview,page = '',
+                               jobid = jid, ids=ids, perf=perf, alert=alert,
+                               error=error, debug=debug, total_time=total_time,
+                               tech=tech, custom_rules=custom_rules,
+                               alert_detailed=alert_detailed, other_logs=other_logs,
+                               eve_json=eve)
 
 # sanitize passed in filename (string) and make it POSIX (fully portable)
 def clean_filename(filename):

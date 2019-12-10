@@ -83,6 +83,11 @@
                     {% if alert_detailed != "" %}
                         <li><a href="#alert-detailed" data-toggle='tab'><i class="icon-zoom-in"></i>&nbsp;Alert Details</a></li>
                     {% endif %}
+
+                    {% if eve_json != "" %}
+                        <li><a href="#eve-json-tab" data-toggle='tab'><i class="icon-leaf"></i>&nbsp;EVE JSON</a></li>
+                    {% endif %}
+
                     <li><a href="#ids" data-toggle='tab'><i class="icon-eye-open"></i>&nbsp;IDS Engine</a></li>
 				    {% if perf != "" %}
 				  	    <li><a href="#perf" data-toggle='tab'><i class="icon-heart"></i>&nbsp;Performance</a></li>
@@ -92,8 +97,6 @@
                         {% for log_description in other_logs %}
                             {% if "Perf" in log_description %}
                                 <li><a href="#{{log_description|replace(" ", "_")}}" data-toggle='tab'><i class="icon-heart"></i>&nbsp;{{log_description}}</a></li>
-			                {% elif "EVE" in log_description %}
-                                <li><a href="#{{log_description|replace(" ", "_")}}" data-toggle='tab'><i class="icon-leaf"></i>&nbsp;{{log_description}}</a></li>
                             {% else %}
                                 <li><a href="#{{log_description|replace(" ", "_")}}" data-toggle='tab'><i class="icon-file"></i>&nbsp;{{log_description}}</a></li>
                             {% endif %}
@@ -118,6 +121,21 @@
                         <div class="tab-pane" id="alert-detailed"><pre>{{alert_detailed}}</pre></div>
                     {% endif %}
 
+                    {% if eve_json != "" %}
+                        <div class="tab-pane" id="eve-json-tab">
+                            <form class="form-inline">
+                                <label class="checkbox">
+                                    <input type="checkbox" name="formatEVE" id="formatEVE" value="custom">
+                                    Format
+                                </label>
+                                <label class="checkbox" style="float: right;">
+                                    <input type="checkbox" name="darkMode" id="darkMode" value="custom">Dark Mode
+                                </label>
+                            </form>
+                            <pre style="font-size:12px" id="eve-json">{{eve_json}}</pre>
+                        </div>
+                    {% endif %}
+
 			    	<div class="tab-pane" id="ids"><pre>{{ids}}</pre></div>
 			        {% if perf != "" %}
 			        	<div class="tab-pane" id="perf"><pre style="font-size:12px">{{perf}}</pre></div>
@@ -127,19 +145,6 @@
                         {% for log_description in other_logs %}
                             {% if "Perf" in log_description or "Stats" in log_description %}
                                 <div class="tab-pane" id="{{log_description|replace(" ", "_")}}"><pre style="font-size:12px">{{other_logs[log_description]}}</pre></div>
-                            {% elif "EVE" in log_description  %}
-                                <div class="tab-pane" id="{{log_description|replace(" ", "_")}}">
-                                    <form class="form-inline">
-                                    <label class="checkbox">
-                                        <input type="checkbox" name="formatEVE" id="formatEVE" value="custom">
-                                        Format
-                                    </label>
-                                    <label class="checkbox" style="float: right;">
-                                        <input type="checkbox" name="darkMode" id="darkMode" value="custom">Dark Mode
-                                    </label>
-                                    </form>
-                                    <pre style="font-size:12px" id="eve-json">{{other_logs[log_description]}}</pre>
-                                </div>
                             {% else %}
                                 <div class="tab-pane" id="{{log_description|replace(" ", "_")}}"><pre>{{other_logs[log_description]}}</pre></div>
                             {% endif %}

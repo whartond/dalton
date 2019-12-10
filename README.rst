@@ -515,7 +515,7 @@ The API can be utilized via HTTP GET requests in this format::
 
 Where ``<jobid>`` is the Job ID and::
 
-    <key> : [alert|alert_detailed|all|debug|error|ids|other_logs|perf|start_time|statcode|status|submission_time|tech|time|user]
+    <key> : [alert|alert_detailed|all|debug|error|eve||ids|other_logs|perf|start_time|statcode|status|submission_time|tech|time|user]
 
 **Valid Keys**
 
@@ -533,6 +533,9 @@ Where ``<jobid>`` is the Job ID and::
 
 -  **error** - Error data from the job.  This is the same as what is
    displayed in the "Error" tab in the job results page.
+
+-  **eve** - EVE JSON output from the job (Suricata only).  This is the same as what is
+   displayed in the "EVE JSON" tab in the job results page.
 
 -  **ids** - IDS Engine output from the job.  This is the same as what
    is displayed in the "IDS Engine" tab in the job results page.  
@@ -590,6 +593,7 @@ Where ``<jobid>`` is the Job ID and::
    the Dalton Agent (this includes job download time by the agent). 
    This is returned as a string and is the same as the "Processing Time"
    displayed in the job results page.
+
 -  **user** - The user who submitted the job. This will always be "undefined" 
    since authentication is not implemented in this release.
 
