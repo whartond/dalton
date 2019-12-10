@@ -965,7 +965,10 @@ def page_show_job(jid):
         except Exception as e:
             #logger.debug(f"Problem getting {jid}-eve log:\n{e}") 
             eve = ""
-
+        event_types = []
+        event_types.append("Alert")
+        event_types.append("DNS")
+        event_types.append("TLS")
         # parse out custom rules option and pass it?
         custom_rules = False
         try:
@@ -987,7 +990,7 @@ def page_show_job(jid):
                                error=error, debug=debug, total_time=total_time,
                                tech=tech, custom_rules=custom_rules,
                                alert_detailed=alert_detailed, other_logs=other_logs,
-                               eve_json=eve)
+                               eve_json=eve, event_types=event_types)
 
 # sanitize passed in filename (string) and make it POSIX (fully portable)
 def clean_filename(filename):

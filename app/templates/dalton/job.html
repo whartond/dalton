@@ -124,14 +124,22 @@
                     {% if eve_json != "" %}
                         <div class="tab-pane" id="eve-json-tab">
                             <form class="form-inline">
-                                <label class="checkbox">
-                                    <input type="checkbox" name="formatEVE" id="formatEVE" value="custom">
-                                    Format
+                                <label class="checkbox inline">
+                                    <input type="checkbox" name="formatEVE" id="formatEVE" value="custom"><span class="label label-success">Format</span>
                                 </label>
-                                <label class="checkbox" style="float: right;">
-                                    <input type="checkbox" name="darkMode" id="darkMode" value="custom">Dark Mode
+                                <label class="checkbox inline" style="float: right;">
+                                    <input type="checkbox" name="darkMode" id="darkMode" value="custom"><span class="label label-inverse">Dark Mode</span>
                                 </label>
                             </form>
+                            {% if event_types|length > 1 %}
+                            <form class="form inline">
+                                {% for event_type in event_types %}
+                                <label class="checkbox inline">
+                                    <input type="checkbox" name="{{event_type}}" id="eve-{{event_type}}" value="custom" checked><span class="label label-info">{{event_type}}</span>
+                                </label>
+                                {% endfor %}
+                            </form>
+                            {% endif %}
                             <pre style="font-size:12px" id="eve-json">{{eve_json}}</pre>
                         </div>
                     {% endif %}
