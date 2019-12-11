@@ -727,8 +727,6 @@ def post_job_results(jobid):
     set_job_status(jobid, STAT_CODE_DONE)
     return Response("OK", mimetype='text/plain', headers = {'X-Dalton-Webapp':'OK'})
 
-# older versions used 'sensor_api' but it really should be 'controller_api'
-@dalton_blueprint.route('/dalton/sensor_api/job_status/<jobid>', methods=['GET'])
 @dalton_blueprint.route('/dalton/controller_api/job_status/<jobid>', methods=['GET'])
 #@login_required()
 def get_ajax_job_status_msg(jobid):
@@ -966,9 +964,13 @@ def page_show_job(jid):
             #logger.debug(f"Problem getting {jid}-eve log:\n{e}") 
             eve = ""
         event_types = []
-        event_types.append("Alert")
-        event_types.append("DNS")
-        event_types.append("TLS")
+        if len(eve) > 0:
+            # pull out all the EVE event types
+            try:
+                eve_list = [json.loads(line) for line in eve.splitlines()]
+                event_types = set([item['event_type'] for item in eve_list if 'event_type' in item])
+            except Exception as e:
+                logger.error(f"Problem parsing EVE log for jobid {jid}:\n{e}")
         # parse out custom rules option and pass it?
         custom_rules = False
         try:
@@ -990,7 +992,7 @@ def page_show_job(jid):
                                error=error, debug=debug, total_time=total_time,
                                tech=tech, custom_rules=custom_rules,
                                alert_detailed=alert_detailed, other_logs=other_logs,
-                               eve_json=eve, event_types=event_types)
+                               eve_json=eve, event_types=sorted(event_types))
 
 # sanitize passed in filename (string) and make it POSIX (fully portable)
 def clean_filename(filename):
@@ -1947,9 +1949,7 @@ def page_about_default():
 # API handling code (some of it)
 #########################################
 
-@dalton_blueprint.route('/dalton/controller_api/v2/<jid>/<requested_data>', methods=['GET'])
-#@auth_required()
-def controller_api_get_request(jid, requested_data):
+def controller_api_get_job_data(jid, requested_data):
     global r
     # add to as necessary
     valid_keys = ('alert', 'alert_detailed', 'ids', 'other_logs', 'eve', 'perf', 'tech', 'error', 'time', 'statcode', 'debug', 'status', 'submission_time', 'start_time', 'user', 'all')
@@ -2000,10 +2000,31 @@ def controller_api_get_request(jid, requested_data):
                         json_response["error_msg"] = "Unexpected error: cannot pull '%s' for jobid %s," % (requested_data, jid)
 
                 json_response["data"] = "%s" % ret_data
+    return json_response
 
+@dalton_blueprint.route('/dalton/controller_api/v2/<jid>/<requested_data>', methods=['GET'])
+#@auth_required()
+def controller_api_get_request(jid, requested_data):
+    json_response = controller_api_get_job_data(jid=jid, requested_data=requested_data)
     return Response(json.dumps(json_response), status=200, mimetype='application/json', headers = {'X-Dalton-Webapp':'OK'})
-    #print "raw response: %s" % json_response
 
+@dalton_blueprint.route('/dalton/controller_api/v2/<jid>/<requested_data>/raw', methods=['GET'])
+#@auth_required()
+def controller_api_get_request_raw(jid, requested_data):
+    json_response = controller_api_get_job_data(jid=jid, requested_data=requested_data)
+    if json_response['error']:
+        return Response(f"ERROR: {json_response['error_msg']}", status=400, mimetype='text/plan', headers = {'X-Dalton-Webapp':'OK'})
+    elif requested_data == "all":
+        return Response(json.dumps(json_response['data']), status=200, mimetype='application/json', headers = {'X-Dalton-Webapp':'OK'})
+    else:
+        filename = f"{jid}_{requested_data}"
+        if requested_data == "eve":
+            mimetype = "application/json"
+            filename = f"{filename}.json"
+        else:
+            mimetype = "text/plain"
+            filename = f"{filename}.txt"
+        return Response(json_response['data'], status=200, mimetype=mimetype, headers = {'X-Dalton-Webapp':'OK', "Content-Disposition":f"attachment;filename={filename}"})
 
 @dalton_blueprint.route('/dalton/controller_api/get-current-sensors/<engine>', methods=['GET'])
 def controller_api_get_current_sensors(engine):

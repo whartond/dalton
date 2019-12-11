@@ -123,11 +123,13 @@
 
                     {% if eve_json != "" %}
                         <div class="tab-pane" id="eve-json-tab">
+                          <div class="span12" style="text-align:center;">
                             <form class="form-inline">
-                                <label class="checkbox inline">
+                                <label class="checkbox inline" style="float:left;">
                                     <input type="checkbox" name="formatEVE" id="formatEVE" value="custom"><span class="label label-success">Format</span>
                                 </label>
-                                <label class="checkbox inline" style="float: right;">
+                                <label class="inline"><a href="/dalton/controller_api/v2/{{jobid}}/eve/raw">Download Raw EVE Log</a></label>
+                                <label class="checkbox inline" style="float:right;">
                                     <input type="checkbox" name="darkMode" id="darkMode" value="custom"><span class="label label-inverse">Dark Mode</span>
                                 </label>
                             </form>
@@ -140,6 +142,7 @@
                                 {% endfor %}
                             </form>
                             {% endif %}
+                          </div>
                             <pre style="font-size:12px" id="eve-json">{{eve_json}}</pre>
                         </div>
                     {% endif %}
