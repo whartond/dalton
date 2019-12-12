@@ -31,13 +31,9 @@
                 myEveArray = [];
                 for(i=0; i < lines.length; i++) {
                     jsonLine = JSON.parse(lines[i]);
-                    console.log("Event type: " + jsonLine.event_type + "  List: " + eventFilterEnable);
                     if (eventFilterEnable.includes(jsonLine.event_type)) {
-                        console.log("KEEPING: " + lines[i]);
                         myEveArray.push(lines[i]);
-                    } else {
-                        console.log("NOTKEEP: " + lines[i]);
-                    }
+                    } 
                 }
                 updateFormat(myEveArray.join('\n'));
             }
@@ -73,7 +69,7 @@
         }
 
         $('#formatEVE').click( function() {
-            updateFormat();
+            updateEveFilters();
         });
 
         $('#darkMode').click( function() {
