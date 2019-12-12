@@ -1,39 +1,89 @@
 {% extends "dalton/layout.html" %}
 {% block js %}
-    var eveRaw = '';
-    var eveJSON = '';
+    var eveRaw = ""
+    var eventTypeFilters = [];
+    {% for event_type in event_types %}
+        eventTypeFilters.push("eve-{{event_type}}");
+    {% endfor %}
+
     $(document).ready(function() {
         eveRaw = document.getElementById("eve-json").innerHTML;
-        eveJSON = JSON.parse('[' + eveRaw.replace(/\r?\n/g, ',').replace(/,+$/,'') + ']');
-        eveJSON = JSON.stringify(eveJSON, null, 2);
+        document.getElementById("eve-json").innerHTML = "HI";
 
-        if ($('#formatEVE').prop('checked')) {
-            document.getElementById("eve-json").innerHTML = eveJSON;
-        } else {
-            document.getElementById("eve-json").innerHTML = eveRaw;
+        function eve2Json(myjson) {
+            return JSON.parse('[' + myjson.replace(/\r?\n/g, ',').replace(/,+$/,'') + ']');
         }
-        hljs.highlightBlock(document.getElementById("eve-json"))
-        $('#formatEVE').click( function() {
-            if ($('#formatEVE').prop('checked')) {
-                document.getElementById("eve-json").innerHTML = eveJSON;
-            } else {
-                document.getElementById("eve-json").innerHTML = eveRaw;
+        function eve2JsonStringify(myjson) {
+            return JSON.stringify(eve2Json(myjson), null, 2);
+        }
+
+        function updateEveFilters() {
+            eventFilterEnable = []
+            for(i=0; i < eventTypeFilters.length; i++) {
+                if ($('#' + eventTypeFilters[i]).prop('checked')) {
+                    eventFilterEnable.push(eventTypeFilters[i].replace(/^eve-/, ''));
+                }
             }
-            hljs.highlightBlock(document.getElementById("eve-json"))
-        });
-        if ($('#darkMode').prop('checked')) {
-                document.getElementById("eve-css").setAttribute('href', "{{ url_for('static', filename='highlightjs/styles/eve-dark.css') }}");
+            if (eventFilterEnable.length == eventTypeFilters.length) {
+                updateFormat(eveRaw);
             } else {
-                document.getElementById("eve-css").setAttribute('href', "{{ url_for('static', filename='highlightjs/styles/eve-light.css') }}");
+                lines = eveRaw.trim().split('\n');
+                myEveArray = [];
+                for(i=0; i < lines.length; i++) {
+                    jsonLine = JSON.parse(lines[i]);
+                    console.log("Event type: " + jsonLine.event_type + "  List: " + eventFilterEnable);
+                    if (eventFilterEnable.includes(jsonLine.event_type)) {
+                        console.log("KEEPING: " + lines[i]);
+                        myEveArray.push(lines[i]);
+                    } else {
+                        console.log("NOTKEEP: " + lines[i]);
+                    }
+                }
+                updateFormat(myEveArray.join('\n'));
+            }
         }
-        $('#darkMode').click( function() {
+
+        function updateDarkMode(noredraw) {
             if ($('#darkMode').prop('checked')) {
                 document.getElementById("eve-css").setAttribute('href', "{{ url_for('static', filename='highlightjs/styles/eve-dark.css') }}");
             } else {
                 document.getElementById("eve-css").setAttribute('href', "{{ url_for('static', filename='highlightjs/styles/eve-light.css') }}");
             }
-            hljs.highlightBlock(document.getElementById("eve-json"))
+            if (!Boolean(noredraw)) {
+                hljs.highlightBlock(document.getElementById("eve-json"));
+            }
+        }
+
+        function updateFormat(rawEve) {
+            if (rawEve == undefined) {
+                rawEve = document.getElementById("eve-json").innerHTML;
+            }
+            if ($('#formatEVE').prop('checked')) {
+                document.getElementById("eve-json").innerHTML = eve2JsonStringify(rawEve);
+            } else {
+                document.getElementById("eve-json").innerHTML = rawEve;
+            }
+            hljs.highlightBlock(document.getElementById("eve-json"));
+        }
+
+        function addEveFilterListener(myfilter) {
+            $('#' + myfilter).click( function() {
+                updateEveFilters();
+            });
+        }
+
+        $('#formatEVE').click( function() {
+            updateFormat();
         });
+
+        $('#darkMode').click( function() {
+            updateDarkMode();
+        });
+
+        eventTypeFilters.forEach(addEveFilterListener);
+
+        updateDarkMode(true);
+        updateEveFilters();
     });
 {% endblock %}
 {% block body %}
@@ -137,7 +187,7 @@
                             <form class="form inline">
                                 {% for event_type in event_types %}
                                 <label class="checkbox inline">
-                                    <input type="checkbox" name="{{event_type}}" id="eve-{{event_type}}" value="custom" checked><span class="label label-info">{{event_type}}</span>
+                                    <input type="checkbox" name="eve-{{event_type}}" id="eve-{{event_type}}" value="custom" checked><span class="label label-info">{{event_type}}</span>
                                 </label>
                                 {% endfor %}
                             </form>
