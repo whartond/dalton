@@ -2,14 +2,16 @@
 {% block js %}
     var eveRaw = ""
     var eventTypeFilters = [];
+    var colorize = true;
     {% for event_type in event_types %}
         eventTypeFilters.push("eve-{{event_type}}");
     {% endfor %}
 
     $(document).ready(function() {
         eveRaw = document.getElementById("eve-json").innerHTML;
-        document.getElementById("eve-json").innerHTML = "HI";
-
+        if (eveRaw.length > 2000000) {
+            colorize = false;
+        }
         function eve2Json(myjson) {
             return JSON.parse('[' + myjson.replace(/\r?\n/g, ',').replace(/,+$/,'') + ']');
         }
@@ -46,7 +48,9 @@
                 document.getElementById("eve-css").setAttribute('href', "{{ url_for('static', filename='highlightjs/styles/eve-light.css') }}");
             }
             if (!Boolean(noredraw)) {
-                hljs.highlightBlock(document.getElementById("eve-json"));
+                if (Boolean(colorize)) {
+                    hljs.highlightBlock(document.getElementById("eve-json"));
+                }
             }
         }
 
@@ -59,7 +63,9 @@
             } else {
                 document.getElementById("eve-json").innerHTML = rawEve;
             }
-            hljs.highlightBlock(document.getElementById("eve-json"));
+            if (Boolean(colorize)) {
+                hljs.highlightBlock(document.getElementById("eve-json"));
+            }
         }
 
         function addEveFilterListener(myfilter) {
