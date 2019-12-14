@@ -697,17 +697,19 @@ def post_job_results(jobid):
 
     # other_logs only supported on Suricata for now
     if "other_logs" in result_obj:
+        logger.debug("Accessing other_log data from agent POST...")
         other_logs = result_obj['other_logs']
     else:
         other_logs = ""
 
     # EVE is Suricata only
     if "eve" in result_obj:
+        logger.debug("Accessing EVE data from agent POST...")
         eve = result_obj['eve']
     else:
         eve = ""
 
-
+    logger.debug("Saving job data to redis...")
     r.set("%s-ids" % jobid, ids)
     r.set("%s-perf" % jobid, perf)
     r.set("%s-alert" % jobid, alert)
@@ -718,6 +720,7 @@ def post_job_results(jobid):
     r.set("%s-other_logs" % jobid, other_logs)
     r.set("%s-eve" % jobid, eve)
     set_keys_timeout(jobid)
+    logger.debug("Done saving job data to redis.")
 
     if error:
         set_job_status_msg(jobid, '<div style="color:red">ERROR!</div> <a href="/dalton/job/%s">Click here for details</a>' % jobid)
@@ -725,6 +728,7 @@ def post_job_results(jobid):
         set_job_status_msg(jobid, '<a href="/dalton/job/%s">Click here to view your results</a>' % jobid)
 
     set_job_status(jobid, STAT_CODE_DONE)
+    logger.debug("Returning from post_job_results()")
     return Response("OK", mimetype='text/plain', headers = {'X-Dalton-Webapp':'OK'})
 
 @dalton_blueprint.route('/dalton/controller_api/job_status/<jobid>', methods=['GET'])
@@ -752,7 +756,6 @@ def get_ajax_job_status_msg(jobid):
 def get_ajax_job_status_code(jobid):
     """return the job status code (AS A STRING! -- you need to cast the return value as an int if you want to use it as an int)"""
     # user's browser requesting job status code
-    global STAT_CODE_INVALID, STAT_CODE_RUNNING
     if not validate_jobid(jobid):
         return "%d" % STAT_CODE_INVALID
     r_status_code = get_job_status(jobid)
@@ -768,8 +771,7 @@ def get_ajax_job_status_code(jobid):
 @dalton_blueprint.route('/dalton/sensor_api/get_job/<id>', methods=['GET'])
 #@auth_required('read')
 def sensor_get_job(id):
-    # user or agent requesting a job zip file
-    global JOB_STORAGE_PATH
+    """user or agent requesting a job zip file"""
     # get the user (for logging)
     logger.debug("Dalton in sensor_get_job(): request for job zip file %s", id)
     if not validate_jobid(id):
@@ -1048,7 +1050,7 @@ def extract_pcaps(archivename, pcap_files, job_id, dupcount):
                 logger.debug("7z command: %s" % p7z_command)
                 # I'm not convinced that 7z outputs to stderr
                 p7z_out = subprocess.Popen(p7z_command, shell=False, stderr=subprocess.STDOUT, stdout=subprocess.PIPE).stdout.read()
-                if "Everything is Ok" not in p7z_out and "Errors: " in p7z_out:
+                if b"Everything is Ok" not in p7z_out and b"Errors: " in p7z_out:
                     logger.error("Problem extracting ZIP archive '%s': %s" % (os.path.basename(archivename), p7z_out))
                     raise Exception("p7zip error. See logs for details")
                 logger.debug("7z out: %s" % p7z_out)
@@ -2011,6 +2013,7 @@ def controller_api_get_request(jid, requested_data):
 @dalton_blueprint.route('/dalton/controller_api/v2/<jid>/<requested_data>/raw', methods=['GET'])
 #@auth_required()
 def controller_api_get_request_raw(jid, requested_data):
+    logger.debug("controller_api_get_request_raw() called")
     json_response = controller_api_get_job_data(jid=jid, requested_data=requested_data)
     if json_response['error']:
         return Response(f"ERROR: {json_response['error_msg']}", status=400, mimetype='text/plan', headers = {'X-Dalton-Webapp':'OK'})
@@ -2024,7 +2027,7 @@ def controller_api_get_request_raw(jid, requested_data):
         else:
             mimetype = "text/plain"
             filename = f"{filename}.txt"
-        return Response(json_response['data'], status=200, mimetype=mimetype, headers = {'X-Dalton-Webapp':'OK', "Content-Disposition":f"attachment;filename={filename}"})
+        return Response(json_response['data'], status=200, mimetype=mimetype, headers = {'X-Dalton-Webapp':'OK', "Content-Disposition":f"attachment; filename={filename}"})
 
 @dalton_blueprint.route('/dalton/controller_api/get-current-sensors/<engine>', methods=['GET'])
 def controller_api_get_current_sensors(engine):

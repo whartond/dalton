@@ -9,7 +9,9 @@
 
     $(document).ready(function() {
         eveRaw = document.getElementById("eve-json").innerHTML;
+        console.debug("EVE size: " + eveRaw.length + " bytes");
         if (eveRaw.length > 2000000) {
+            console.log("EVE log is " + eveRaw.length + " bytes. Turning off syntax highlighting.")
             colorize = false;
         }
         function eve2Json(myjson) {
