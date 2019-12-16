@@ -742,12 +742,12 @@ provided here but can be easily obtained by making the request in a web browser.
 
 .. code:: javascript
 
-    {"sensor_tech": ["suricata-4.0.1", "suricata-3.2.4", "suricata-2.0.9"]}
+    {"sensor_tech": ["suricata/4.0.1", "suricata/3.2.4", "suricata/2.0.9"]}
 
 -  | **/dalton/controller_api/get-current-sensors-json-full**
    | Response is a JSON payload with details about
      all the current active sensors (agents). Info includes agent IP,
-     last check-in time, tech (e.g. ``suricata-4.0.1``), etc.
+     last check-in time, tech (e.g. ``suricata/4.0.1``), etc.
 
 -  | **/dalton/controller_api/get-prod-rulesets/<engine>**
    | Returns a list of current available production rulesets on the

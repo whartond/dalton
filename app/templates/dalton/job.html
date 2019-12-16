@@ -13,6 +13,7 @@
         if (eveRaw.length > 2000000) {
             console.log("EVE log is " + eveRaw.length + " bytes. Turning off syntax highlighting.")
             colorize = false;
+            document.getElementById("darkMode").disabled = true;
         }
         function eve2Json(myjson) {
             return JSON.parse('[' + myjson.replace(/\r?\n/g, ',').replace(/,+$/,'') + ']');
@@ -177,7 +178,7 @@
 
                     {% if eve_json != "" %}
                         <div class="tab-pane" id="eve-json-tab">
-                          <div class="span12" style="text-align:center;">
+                          <div class="span12" style="text-align:center;background-color:#ffffff;">
                             <form class="form-inline">
                                 <label class="checkbox inline" style="float:left;">
                                     <input type="checkbox" name="formatEVE" id="formatEVE" value="custom"><span class="label label-success">Format</span>
@@ -197,7 +198,7 @@
                             </form>
                             {% endif %}
                           </div>
-                            <pre style="font-size:12px" id="eve-json">{{eve_json}}</pre>
+                            <pre style="font-size:12px;padding: 0.5em;overflow-x: auto;display: block;" id="eve-json">{{eve_json}}</pre>
                         </div>
                     {% endif %}
 
