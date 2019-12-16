@@ -2017,11 +2017,9 @@ def controller_api_get_request_raw(jid, requested_data):
     json_response = controller_api_get_job_data(jid=jid, requested_data=requested_data)
     if json_response['error']:
         return Response(f"ERROR: {json_response['error_msg']}", status=400, mimetype='text/plan', headers = {'X-Dalton-Webapp':'OK'})
-    elif requested_data == "all":
-        return Response(json.dumps(json_response['data']), status=200, mimetype='application/json', headers = {'X-Dalton-Webapp':'OK'})
     else:
         filename = f"{jid}_{requested_data}"
-        if requested_data == "eve":
+        if requested_data in ["eve", "all"]:
             mimetype = "application/json"
             filename = f"{filename}.json"
         else:
