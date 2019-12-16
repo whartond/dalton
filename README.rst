@@ -58,10 +58,6 @@ Contents
 -  `Dalton API <#dalton-api>`__
 
    -  `Job API <#job-api>`__
-
-      - `JSON API <#json-api>`__
-      - `RAW API <#raw-api>`__
-
    -  `Controller API <#controller-api>`__
 
 -  `Teapot Jobs <#teapot-jobs>`__
@@ -554,8 +550,8 @@ The RAW API can be utilized via the same HTTP GET requests appended with "/raw":
 
 The ``<jobid>`` and ``<key>`` are the same as the JSON API but a
 RAW API request returns the raw data from the Redis database, in the response body.
-This is basically what is return from the JSON API but not encapsulated as JSON.  For
-RAW API respones, the Content-Type header is set to "text/plain" with the exception of
+This is basically what is returned from the JSON API but not encapsulated as JSON.  For
+RAW API responses, the Content-Type header is set to "text/plain" with the exception of
 the "eve" and "all" logs which
 use "application/json".  A RAW request for the "all" key return a string representation
 of a Python dictionary with all the key-value pairs.
@@ -631,12 +627,12 @@ in the Content-Disposition header that prompt browsers to download/save the file
    job was submitted to the Dalton Controller.
 
 -  **tech** - The sensor technology (i.e. engine and version) the job was submitted
-   for, in the format <engine>/<version>.
-   For example, `suricata/4.0.0` is Suricata v4.0.0.
+   for, in the format ``<engine>/<version>``.
+   For example, ``suricata/4.0.0`` is Suricata v4.0.0.
    If a custom config is used, it will be added on the end, also separated by a
-   forward slash.  Example: `suricata/4.0.7/mycustomconfigname`.  A Suricata 4
-   sensor compiled with Rust support will have "rust_" prepended to the version,
-   for example `suricata/rust_4.1.5`.
+   forward slash.  For example, ``suricata/4.0.7/mycustomconfigname``.  A Suricata 4
+   sensor compiled with Rust support will have "rust\_" prepended to the version,
+   for example, ``suricata/rust_4.1.5``.
 
 -  **time** - The time in seconds the job took to run, as reported by
    the Dalton Agent (this includes job download time by the agent). 
