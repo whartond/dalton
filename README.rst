@@ -689,7 +689,7 @@ RAW API Request::
 
 RAW API Response:
 
-.. code:
+.. code::
 
     12/16/2019-20:03:24.094114  [**] [1:806421601:0] MyMalware C2 Request Outbound [**]
     [Classification: (null)] [Priority: 3] {TCP} 192.168.102.203:45661 -> 172.16.31.41:80
