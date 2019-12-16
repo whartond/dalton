@@ -58,6 +58,10 @@ Contents
 -  `Dalton API <#dalton-api>`__
 
    -  `Job API <#job-api>`__
+
+      - `JSON API <#json-api>`__
+      - `RAW API <#raw-api>`__
+
    -  `Controller API <#controller-api>`__
 
 -  `Teapot Jobs <#teapot-jobs>`__
