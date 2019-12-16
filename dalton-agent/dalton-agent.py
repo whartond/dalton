@@ -66,7 +66,7 @@ parser.add_option("-c", "--config",
 dalton_config_file = options.configfile
 
 # get options from dalton config file
-config = configparser.SafeConfigParser()
+config = configparser.ConfigParser()
 
 if not os.path.exists(dalton_config_file):
     # just print to stdout; logging hasn't started yet
