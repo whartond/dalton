@@ -507,7 +507,7 @@ Job API
 -------
 
 The Dalton controller provides a RESTful API to retrieve data about
-submitted jobs.  API responses use JSON or the raw ("RAW") data and
+submitted jobs.  API responses use JSON or the raw ("RAW") data, and
 the data returned in the values is, 
 in most cases, just the raw text that is displayed in the Dalton web interface.
 
@@ -1040,7 +1040,7 @@ the ``static`` directory to serve the config files and changing it will
 mostly like break something.
 
 Sensor configuration files 
-are not automatically added when Agents are build or the Controller is run; 
+are not automatically added when Agents are built or the Controller is run; 
 they must be manually added. 
 However, the Dalton Controller already comes with the default (from source) config files 
 for Suricata versions 0.8.1 and later, and for Snort 2.9.0 and later. 
