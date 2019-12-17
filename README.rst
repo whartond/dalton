@@ -262,8 +262,7 @@ sensor technology. The user will be prompted to select the sensor to be
 used, supply a packet capture and ruleset (pre-defined and/or custom),
 and given the ability to configure other options using the vertical
 tab(s) on the submission page. On the 'Config Files' tab a user can
-modify the sensor configuration file. The variables (e.g. $HTTP\_PORTS)
-are split out from the rest of the config in the UI.
+modify the sensor configuration file.
 
 Please be aware that in most rulesets, almost all rules looking at TCP
 traffic are set to inspect established sessions. This means that if a
@@ -402,25 +401,15 @@ Config Files
 On the job submission page, the "Config Files" vertical tab provides the
 ability to edit the configuration file(s) for the sensor:
 
--  | **Variables**
-   |  The variables that can be used by the rules.
-      If the ``Override EXTERNAL_NET (set to 'any')`` option is selected
-      (on by default), then the ``EXTERNAL_NET`` IP variable will be set to
-      ``any`` when the job is submitted.
-
 -  | **Configuration File**
-   | The engine configuration file, minus rule the variables, that the
+   | The engine configuration file, including variables, that the
      Dalton agent uses for the job.
 
-The variables and rest of the configuration file are separated
-dynamically when the pages loads, or when a new sensor version is
-selected. But on the disk the config is just one file in the
-"engine-configs/" directory (e.g.
-'engine-configs/suricata/suricata-4.0.0.yaml'). See also `Updating
-Sensor Configs <#updating-sensor-configs>`__. 
-When a job is submitted to the Controller, the ``Variables`` and
-``Configuration File`` values will be combined in to a single file for a
-Suricata Dalton agent job.
+If the ``Override EXTERNAL_NET (set to 'any')`` option is selected
+(on by default), then the ``EXTERNAL_NET`` IP variable will be set to
+``any`` when the job is submitted.
+
+See also `Updating Sensor Configs <#updating-sensor-configs>`__. 
 
 Job Results
 ===========
@@ -433,6 +422,14 @@ presents the results from the job run in a tabulated interface:
 -  | **Alert Details**
    | If ``Include Detailed Alerts`` is selected for a job, detailed output
      from processing unified2 alert files will be shown here.
+-  | **EVE JSON** (Suricata only)
+   | The EVE log, if EVE logging is enabled.  The ``Format`` checkbox
+     "pretty-prints" the EVE data; the ``Dark Mode`` checkbox applies
+     a dark mode theme/coloring to the EVE data.  The UI also dynamically
+     presents checkboxes based on the event types present in the EVE log.
+     These can be used to filter the displayed EVE data.
+     If the EVE data is more than 2000 bytes, the ``Dark Mode`` option is
+     disabled and syntax coloring is turned off, for performance reasons.
 -  | **IDS Engine**
    | This the raw output from the IDS engine. For Snort jobs, the engine
      statistics will be in this tab, at the bottom.
