@@ -423,7 +423,8 @@ presents the results from the job run in a tabulated interface:
    | If ``Include Detailed Alerts`` is selected for a job, detailed output
      from processing unified2 alert files will be shown here.
 -  | **EVE JSON** (Suricata only)
-   | The EVE log, if EVE logging is enabled.  The ``Format`` checkbox
+   | The EVE log, with syntax highlighting, if EVE logging is enabled.
+     The ``Format`` checkbox
      "pretty-prints" the EVE data; the ``Dark Mode`` checkbox applies
      a dark mode theme/coloring to the EVE data.  The UI also dynamically
      presents checkboxes based on the event types present in the EVE log.
