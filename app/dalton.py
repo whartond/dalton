@@ -1171,7 +1171,8 @@ def submit_job():
 #@auth_required()
 # ^^ can change and add resource and group permissions if we want to restrict who can submit jobs
 def page_coverage_summary():
-    """ the summary page once the coverage wizard has been submitted"""
+    """ Handle job submission from UI.
+    """
     # user submitting a job to Dalton via the web interface
     global JOB_STORAGE_PATH
     global TEMP_STORAGE_PATH
@@ -1356,6 +1357,18 @@ def page_coverage_summary():
         try:
             if request.form.get('optionAlertDetailed'):
                 bGetAlertDetailed = True
+            if sensor_tech_engine == "suricata" and int(sensor_tech_version.split('.')[0]) >= 6:
+                bGetAlertDetailed = False
+        except:
+            pass
+
+        # generate EVE log (only supported by Suricata)
+        bGetOEveLog = False
+        try:
+            if request.form.get('optionEveLog'):
+                bGetEveLog = True
+            if sensor_tech_engine == "suricata" and int(sensor_tech_version.split('.')[0]) < 2:
+                bGetEveLog = False
         except:
             pass
 
@@ -1523,25 +1536,26 @@ def page_coverage_summary():
                     config['outputs'].append(fast_config)
 
                 # unified2 logging
-                deployment = "reverse"
-                header = "X-Forwarded-For"
-                if 'unified2-alert' in olist:
-                    try:
-                        deployment = config['outputs'][olist.index('unified2-alert')]['unified2-alert']['xff']['deployment']
-                    except Exception as e:
-                        logger.debug("Could not get outputs->unified2-alert->xff->deployment.  Using default value of '%s'" % deployment)
-                    try:
-                        header = config['outputs'][olist.index('unified2-alert')]['unified2-alert']['xff']['header']
-                    except Exception as e:
-                        logger.debug("Could not get outputs->unified2-alert->xff->header.  Using default value of '%s'" % header)
-                u2_config = {'unified2-alert': {'enabled': True, \
-                             'filename': "unified2.dalton.alert", \
-                             'xff': {'enabled': True, 'mode': 'extra-data', \
-                                     'deployment': deployment, 'header': header}}}
-                if 'unified2-alert' in olist:
-                    config['outputs'][olist.index('unified2-alert')] = u2_config
-                else:
-                    config['outputs'].append(u2_config)
+                if bGetAlertDetailed:
+                    deployment = "reverse"
+                    header = "X-Forwarded-For"
+                    if 'unified2-alert' in olist:
+                        try:
+                            deployment = config['outputs'][olist.index('unified2-alert')]['unified2-alert']['xff']['deployment']
+                        except Exception as e:
+                            logger.debug("Could not get outputs->unified2-alert->xff->deployment.  Using default value of '%s'" % deployment)
+                        try:
+                            header = config['outputs'][olist.index('unified2-alert')]['unified2-alert']['xff']['header']
+                        except Exception as e:
+                            logger.debug("Could not get outputs->unified2-alert->xff->header.  Using default value of '%s'" % header)
+                    u2_config = {'unified2-alert': {'enabled': True, \
+                                 'filename': "unified2.dalton.alert", \
+                                 'xff': {'enabled': True, 'mode': 'extra-data', \
+                                         'deployment': deployment, 'header': header}}}
+                    if 'unified2-alert' in olist:
+                        config['outputs'][olist.index('unified2-alert')] = u2_config
+                    else:
+                        config['outputs'].append(u2_config)
 
                 #stats
                 stats_config = {'stats': {'enabled': True, \
@@ -1599,10 +1613,12 @@ def page_coverage_summary():
                     else:
                         config['outputs'].append(dns_config)
 
-                    # Don't try to enable eve-log since it is unformatted and redundant in many cases.
-                    # But in case it is enabled, set the filename and disable EVE tls since you
-                    # can't have tls log to file AND be included in the EVE log.
-                    try:
+                # EVE Log
+                try:
+                    if bGetEveLog:
+                        # Enable EVE Log
+                        config['outputs'][olist.index('eve-log')]['eve-log']['enabled'] = True
+
                         # set filename
                         config['outputs'][olist.index('eve-log')]['eve-log']['filename'] = "dalton-eve.json"
 
@@ -1634,9 +1650,14 @@ def page_coverage_summary():
                                 except Exception as e:
                                     #logger.debug("Possible issue when removing outputs->eve-log->types->tls (EVE TLS log). Error: %s" % e)
                                     pass
-                    except Exception as e:
-                        logger.debug("Problem editing eve-log section of config: %s" % e)
-                        pass
+                    else:
+                        # disable EVE Log if Suricata version supports it
+                        if int(sensor_tech_version.split('.')[0]) >= 2:
+                            # disable EVE Log here
+                            config['outputs'][olist.index('eve-log')]['eve-log']['enabled'] = False
+                except Exception as e:
+                    logger.warn("Problem editing eve-log section of config: %s" % e)
+                    pass
 
                 # set filename for rule and keyword profiling
                 if bTrackPerformance:
