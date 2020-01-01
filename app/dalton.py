@@ -1280,12 +1280,10 @@ def page_coverage_summary():
             delete_temp_files(job_id)
             return render_template('/dalton/error.html', jid='', msg=[f"Bad sensor_tech string submitted: '{sensor_tech}'."])
 
-        # If multiple files submitted to Suricata, merge them here since
-        #  Suricata can only read one file. Update: Suri 4.1? and later can
-        #  TODO: don't merge if sensor_tech_engine == "suricata" and
-        #        LooseVersion(sensor_tech_version) >= LooseVersion(4.1) (if that is the right one).
-        #        Will need to check/update agent code accordingly.
-        if len(pcap_files) > 1 and sensor_tech.startswith("suri"):
+        # If multiple files submitted to Suricata, merge them here if the
+        # Suricata version is < 4.1 since that is when support for multiple pcaps
+        # was added.
+        if len(pcap_files) > 1 and sensor_tech.startswith("suri") and LooseVersion(sensor_tech_version) < LooseVersion("4.1"):
             if not MERGECAP_BINARY:
                 logger.error("No mergecap binary; unable to merge pcaps for Suricata job.")
                 delete_temp_files(job_id)
