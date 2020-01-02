@@ -1604,12 +1604,14 @@ def page_coverage_summary():
 
                     # dns
                     dns_config = {'dns-log': {'enabled': True, \
-                                                'filename': "dalton-dns.log", \
-                                                'append': True}}
-                    if 'dns-log' in olist:
-                        config['outputs'][olist.index('dns-log')] = dns_config
-                    else:
-                        config['outputs'].append(dns_config)
+                                              'filename': "dalton-dns.log", \
+                                              'append': True}}
+                    # Support for DNS log dropped in Suricata 5 :(
+                    if LooseVersion(sensor_tech_version) < LooseVersion("5"):
+                        if 'dns-log' in olist:
+                            config['outputs'][olist.index('dns-log')] = dns_config
+                        else:
+                            config['outputs'].append(dns_config)
 
                 # EVE Log
                 try:
