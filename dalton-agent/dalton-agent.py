@@ -96,6 +96,8 @@ except Exception as e:
     print(f"Error parsing config file, '{dalton_config_file}':\n\n{e}\n\nexiting.")
     sys.exit(1)
 
+SENSOR_ENGINE_VERSION_ORIG = 'undefined'
+
 #***************
 #*** Logging ***
 #***************
@@ -139,6 +141,7 @@ def find_file(name):
 
 ''' returns the version of the engine given full path to binary (e.g. Suricata, Snort) '''
 def get_engine_version(path):
+    global SENSOR_ENGINE_VERSION_ORIG
     engine = "unknown"
     version = "unknown"
     try:
@@ -164,6 +167,8 @@ def get_engine_version(path):
         result = regex.search(output.decode('utf-8'))
         if result:
             version = result.group('version')
+
+        SENSOR_ENGINE_VERSION_ORIG = version
 
         # if Suricata version 4, see if Rust is enabled and add to version string
         if "suricata" in engine  and version.split('.')[0] == "4":
@@ -672,11 +677,8 @@ def run_suricata():
     # some Suri versions don't support all modern options like '-k' so try to deal with that here
     add_options = ""
     try:
-        myversion = SENSOR_ENGINE_VERSION
-        if myversion.startswith("rust_"):
-            myversion = myversion[5:]
-        if LooseVersion(myversion) >= LooseVersion("2.0"):
-            # not sure if the '-k' option was added is Suri 2.0 or some other time but setting it to this for now
+        if LooseVersion(SENSOR_ENGINE_VERSION_ORIG) >= LooseVersion("2.0"):
+            # not sure if the '-k' option was added in Suri 2.0 or earlier but for now just doing this for v2 and later
             add_options = "-k none"
     except Exception as e:
         add_options = ""
@@ -1054,11 +1056,8 @@ def submit_job(job_id, job_directory):
         print_debug("adding default-rule-path to yaml:\n%s\n" % '\n'.join(IDS_RULES_FILES))
         suri_yaml_fh.write("default-rule-path: %s\n" % JOB_DIRECTORY)
         suri_yaml_fh.close()
-        myversion = SENSOR_ENGINE_VERSION
-        if myversion.startswith("rust_"):
-            myversion = myversion[5:]
         # reading multiple pcaps added in Suricata 4.1
-        if len(PCAP_FILES) > 1 and LooseVersion("4.1") > LooseVersion(myversion):
+        if len(PCAP_FILES) > 1 and LooseVersion("4.1") > LooseVersion(SENSOR_ENGINE_VERSION_ORIG):
             print_error("Multiple pcap files were submitted to the Dalton Agent for a Suricata job.\n\nSuricata can only read a single pcap file so multiple pcaps submitted to the Dalton Controller should have been combined by the Controller when packaging the job.\n\nIf you see this, something went wrong on the Controller or you are doing something untoward.")
 
     if SENSOR_ENGINE.startswith('snort'):
