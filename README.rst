@@ -281,7 +281,7 @@ Job Settings
 On the job submission page, the "Job Settings" vertical tab provides a
 number of user-configurable options:
 
--  **Packet Captures**
+-  | **Packet Captures**
    | Specify packet captures (libpcap format) to be run across the
      sensor. Depending on the engine, pcapng format may be supported as
      well. Archive files that contain pcaps can be submitted and the files
@@ -302,7 +302,7 @@ number of user-configurable options:
         redirect the user to the Queue page.  If this is a `Teapot job <#teapot-jobs>`__,
         then a comma separated list of JIDs is returned.
 
--  **Sensor Version**
+-  | **Sensor Version**
    | The specific sensor version to use to run the specified pcap(s)
      and rule(s).
 
