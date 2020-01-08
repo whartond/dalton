@@ -1215,8 +1215,11 @@ def page_coverage_summary():
         pcap_files.append({'filename': fspcap, 'pcappath': os.path.join(FS_PCAP_PATH, os.path.basename(fspcap))})
 
     bSplitCap = False
-    if request.form.get("optionSplitcap"):
-        bSplitCap = True
+    try:
+        if request.form.get("optionSplitcap"):
+            bSplitCap = True
+    except:
+        pass
 
     # grab the user submitted files from the web form (max number of arbitrary files allowed on the web form
     # governed by max_pcap_files variable in dalton.conf)
@@ -1926,7 +1929,7 @@ def page_coverage_summary():
 
         if bteapotJob:
             if bSplitCap:
-                return splitcap_jid_list.join(',')
+                return ','.join(splitcap_jid_list)
             else:
                 return jid
         else:
