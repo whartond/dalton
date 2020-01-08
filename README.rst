@@ -296,7 +296,7 @@ number of user-configurable options:
      combined into a single pcap on job submission since (older versions of) Suricata can
      only read a single pcap in read pcap mode.
 
-   -  | ** Create separate jobs for each pcap**
+   -  | **Create separate jobs for each pcap**
       | If selected, each pcap file sumitted (or found in an archive) will be
         submitted as its own job.  When all the jobs are submitted, Dalton will
         redirect the user to the Queue page.  If this is a `Teapot job <#teapot-jobs>`__,
