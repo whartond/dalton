@@ -1214,6 +1214,10 @@ def page_coverage_summary():
             return render_template('/dalton/error.html', jid='', msg=[err_msg])
         pcap_files.append({'filename': fspcap, 'pcappath': os.path.join(FS_PCAP_PATH, os.path.basename(fspcap))})
 
+    bSplitCap = False
+    if request.form.get("optionSplitcap")
+        bSplitCap = True
+
     # grab the user submitted files from the web form (max number of arbitrary files allowed on the web form
     # governed by max_pcap_files variable in dalton.conf)
     # note that these are file handle objects? have to get filename using .filename
@@ -1283,7 +1287,7 @@ def page_coverage_summary():
         # If multiple files submitted to Suricata, merge them here if the
         # Suricata version is < 4.1 since that is when support for multiple pcaps
         # was added.
-        if len(pcap_files) > 1 and sensor_tech.startswith("suri") and LooseVersion(sensor_tech_version) < LooseVersion("4.1"):
+        if len(pcap_files) > 1 and sensor_tech.startswith("suri") and LooseVersion(sensor_tech_version) < LooseVersion("4.1") and not bSplitCap:
             if not MERGECAP_BINARY:
                 logger.error("No mergecap binary; unable to merge pcaps for Suricata job.")
                 delete_temp_files(job_id)
@@ -1784,6 +1788,7 @@ def page_coverage_summary():
             jid = 'teapot_%s' % jid
         zf_path = '%s/%s.zip' % (JOB_STORAGE_PATH, jid)
         zf = zipfile.ZipFile(zf_path, mode='w')
+        # AAAAA splitcap here?
         try:
             for pcap in pcap_files:
                 zf.write(pcap['pcappath'], arcname=os.path.basename(pcap['filename']))
@@ -1912,7 +1917,7 @@ def page_coverage_summary():
             else:
                 # this shouldn't be the case with '_external=True' passed to url_for()
                 logger.warn("URL does not start with 'http': %s" % rurl)
-        return redirect(rurl)
+            return redirect(rurl)
 
 @dalton_blueprint.route('/dalton/queue')
 #@login_required()
