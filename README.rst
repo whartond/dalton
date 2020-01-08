@@ -281,7 +281,7 @@ Job Settings
 On the job submission page, the "Job Settings" vertical tab provides a
 number of user-configurable options:
 
--  | **Packet Captures**
+-  **Packet Captures**
    | Specify packet captures (libpcap format) to be run across the
      sensor. Depending on the engine, pcapng format may be supported as
      well. Archive files that contain pcaps can be submitted and the files
@@ -296,7 +296,13 @@ number of user-configurable options:
      combined into a single pcap on job submission since (older versions of) Suricata can
      only read a single pcap in read pcap mode.
 
--  | **Sensor Version**
+   -  | ** Create separate jobs for each pcap**
+      | If selected, each pcap file sumitted (or found in an archive) will be
+        submitted as its own job.  When all the jobs are submitted, Dalton will
+        redirect the user to the Queue page.  If this is a `Teapot job <#teapot-jobs>`__,
+        then a comma separated list of JIDs is returned.
+
+-  **Sensor Version**
    | The specific sensor version to use to run the specified pcap(s)
      and rule(s).
 
