@@ -91,6 +91,10 @@ try:
     API_KEY = config.get('dalton', 'API_KEY')
     POLL_INTERVAL = int(config.get('dalton', 'POLL_INTERVAL'))
     KEEP_JOB_FILES = config.getboolean('dalton', 'KEEP_JOB_FILES')
+    SURICATA_SOCKET_CONTROL = config.getboolean('dalton', 'SURICATA_SOCKET_CONTROL')
+    SURICATA_SC_PYTHON_MODULES = config.get('dalton', 'SURICATA_SC_PYTHON_MODULES')
+    SURICATA_SOCKET_NAME = config.get('dalton', 'SURICATA_SOCKET_NAME')
+
 except Exception as e:
     # just print to stdout; logging hasn't started yet
     print(f"Error parsing config file, '{dalton_config_file}':\n\n{e}\n\nexiting.")
@@ -187,7 +191,7 @@ def get_engine_version(path):
 #*** Constant Variables ***
 #**************************
 
-AGENT_VERSION = "3.0.0"
+AGENT_VERSION = "3.1.0"
 HTTP_HEADERS = {
     "User-Agent" : f"Dalton Agent/{AGENT_VERSION}"
 }
@@ -238,6 +242,12 @@ if SENSOR_CONFIG == "auto":
 else:
     sensor_config_variable = f"SENSOR_CONFIG={SENSOR_CONFIG}&"
 
+if SURICATA_SOCKET_CONTROL:
+    if os.path.isdir(SURICATA_SC_PYTHON_MODULES):
+        sys.path.append(SURICATA_SC_PYTHON_MODULES)
+    # Used as Suricata default-log-dir when in SC mode
+    os.makedirs(os.path.dirname(SURICATA_SOCKET_NAME), exist_ok=True)
+
 req_job_url = (f"{DALTON_API}/request_job?"
                f"SENSOR_ENGINE={SENSOR_ENGINE}&"
                f"SENSOR_ENGINE_VERSION={SENSOR_ENGINE_VERSION}&"
@@ -255,6 +265,8 @@ logger.info("\tSENSOR_ENGINE_VERSION: %s" % SENSOR_ENGINE_VERSION)
 logger.info("\tSENSOR_CONFIG: %s" % SENSOR_CONFIG)
 logger.info("\tIDS_BINARY: %s" % IDS_BINARY)
 logger.info("\tTCPDUMP_BINARY: %s" % TCPDUMP_BINARY)
+if SENSOR_ENGINE.startswith("suricata"):
+    logger.info("\tSURICATA_SOCKET_CONTROL: %s" % SURICATA_SOCKET_CONTROL)
 
 # just in case the Dalton Agent is set to use a proxy, exclude "dalton_web" which is the
 # web server container and communication with it shouldn't go thru a proxy; if the
@@ -298,11 +310,25 @@ TOTAL_PROCESSING_TIME = ''
 ERROR_SLEEP_TIME = 5
 URLLIB_TIMEOUT = 120
 
+# used by Suricata socket control
+# class SocketControl ... TODO
+
 #**************************
 #*** Custom Error Class ***
 #**************************
 class DaltonError(Exception):
     pass
+
+#***********************
+#*** Custom Imports ***#
+#***********************
+
+if SURICATA_SOCKET_CONTROL:
+    try:
+        import suricatasc
+    except Exception as e:
+        logger.error(f"Unable to import 'suricatasc' module (SURICATA_SC_PYTHON_MODULES set to '{SURICATA_SC_PYTHON_MODULES}'. Suricata Socket Control will be disabled.")
+        SURICATA_SOCKET_CONTROL = False
 
 #****************************************
 #*** Communication/Printing Functions ***
