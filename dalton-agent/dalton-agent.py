@@ -50,6 +50,7 @@ from logging.handlers import RotatingFileHandler
 from distutils.version import LooseVersion
 import binascii
 import hashlib
+import threading
 
 # urllib2 in Python < 2.6 doesn't support setting a timeout so doing it like this
 socket.setdefaulttimeout(120)
@@ -769,20 +770,26 @@ def run_snort():
 #** Suricata Functions **
 #************************
 
-def restart_suricata_socket_mode(newconfig):
+def restart_suricata_socket_mode(newconfig, shutdown_old=True):
     if SCONTROL is None:
         # shouldn't happen
         logger.error("restart_suricata_socket_mode() called but Socket Control is not set up.")
         raise Exception("Suricata Socket Control not initialized.")
 
-    try:
-        SCONTROL.connect()
-        SCONTROL.shutdown()
-        SCONTROL.close()
-    except Exception as e:
-        pass
+    if shutdown_old:
+        # Suricata should be running, stop it so we can start
+        # a new one with a new config and/or rules
+        try:
+            SCONTROL.connect()
+            SCONTROL.shutdown()
+            SCONTROL.close()
+        except Exception as e:
+            print_error(f"Problem shutting down old Suricata instance in restart_suricata_socket_mode(): {e}")
+
     if os.path.exists("/tmp/dalton-suricata.log"):
         os.unlink("/tmp/dalton-suricata.log")
+        # touch file?
+        Path("/tmp/dalton-suricata.log").touch()
     if os.path.exists("/usr/local/var/run/suricata.pid"):
         os.unlink("/usr/local/var/run/suricata.pid")
 
@@ -810,9 +817,13 @@ def run_suricata_sc():
     if not (ruleset_hash == SCONTROL.ruleset_hash and config_hash == SCONTROL.config_hash):
         # if hashes don't match, shutdown suri via socket, start new suri, update hashes, run
         print_debug("Suricata Socket Control: new hashes found, restarting Suricata.....")
+        shutdown_old = True
+        if SCONTROL.ruleset_hash is None:
+            # Suricata not running, this is the first job since the agent was started.
+            shutdown_old = False
         SCONTROL.ruleset_hash = ruleset_hash
         SCONTROL.config_hash = config_hash
-        restart_suricata_socket_mode(IDS_CONFIG_FILE)
+        restart_suricata_socket_mode(newconfig=IDS_CONFIG_FILE, shutdown_old=shutdown_old)
     else:
         print_debug("Not restart Suri, just feeding pcaps.........")
     SCONTROL.connect()
