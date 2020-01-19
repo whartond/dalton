@@ -51,6 +51,7 @@ from distutils.version import LooseVersion
 import binascii
 import hashlib
 import threading
+from pathlib import Path
 
 # urllib2 in Python < 2.6 doesn't support setting a timeout so doing it like this
 socket.setdefaulttimeout(120)
@@ -271,6 +272,7 @@ else:
     sensor_config_variable = f"SENSOR_CONFIG={SENSOR_CONFIG}&"
 
 if not SENSOR_ENGINE.startswith("suricata"):
+    #TODO: check for supported Suricata version
     USE_SURICATA_SOCKET_CONTROL = False
 
 if USE_SURICATA_SOCKET_CONTROL:
@@ -348,13 +350,17 @@ SCONTROL = None
 #*** Custom Classes ***
 #**********************
 
-# basically a wrapper for Suricata socket control
 class SocketController:
+    """ Basically a wrapper for Suricata socket control.
+        Also handles start/restar of Suricata which is
+        run in daemon mode.
+    """
     def __init__(self, socket_path):
         try:
             self.sc = suricatasc.SuricataSC(socket_path)
             self.ruleset_hash = None
             self.config_hash = None
+            self.suricata_is_running = False
         except Exception as e:
             print_error("Problem initializing Suricata socket control: %s" % e)
 
@@ -378,6 +384,7 @@ class SocketController:
         return json.dumps(cmdret["message"])
 
     def close(self):
+        """Close socket connection."""
         self.sc.close()
         logger.debug("Closed connection to socket.")
 
@@ -385,11 +392,57 @@ class SocketController:
         """Shutdown Suricata process."""
         logger.debug("Shutting down Suricata Unix Socket instance.")
         self.send_command("shutdown")
+        # TODO delete log /tmp/dalton-suricata.log
 
-    def startup(self, config):
-        """Start Surictata with Unix Socket listner."""
-        pass
-        # TODO
+    def stop_suricata_daemon(self):
+        """Stop Suricata daemon using socket control."""
+        logger.debug("stop_suricata_daemon() called")
+        if self.suricata_is_running is False:
+            logger.warn("stop_suricata_daemon() called but Suricata my not be running.")
+            # Suricata daemon is running; stop it so we can start
+            # a new one with a new config and/or rules
+        try:
+            self.connect()
+            self.shutdown()
+            self.close()
+        except Exception as e:
+            print_error(f"Problem shutting down old Suricata instance in stop_suricata_daemon(): {e}")
+        self.suricata_is_running = False
+
+    def start_suricata_daemon(self, config):
+        """Start Suricata thread with Unix Socket listener."""
+        logger.debug("start_suricata_daemon() called")
+        if config is None:
+            print_error("start_suricata_daemon() called but not initialized.")
+        # start Suri
+        suricata_command = f"suricata -c {config} -k none --runmode single --unix-socket={SURICATA_SOCKET_NAME} -D"
+        print_debug(f"Starting suricata thread with the following command:\n{suricata_command}")
+    #    with open(JOB_IDS_LOG, "w") as suri_output_fh:
+    #    subprocess.call(suricata_command, shell = True, stderr=subprocess.STDOUT, stdout=suri_output_fh)
+    #    subprocess.call(suricata_command, shell = True)
+        # use Popen() instead of call() since the latter blocks which isn't what we want
+        subprocess.Popen(suricata_command, shell = True)
+        # wait for Suricata to be ready to process traffic before returning
+        # tail /tmp/dalton-suricata.log, look for "engine started."
+        time.sleep(4)
+        self.suricata_is_running = True
+
+    def restart_suricata_socket_mode(self, newconfig):
+        if self.suricata_is_running is True:
+            # Suricata daemon is running; stop it so we can start
+            # a new one with a new config and/or rules
+            self.stop_suricata_daemon()
+
+        if os.path.exists("/tmp/dalton-suricata.log"):
+            logger.debug("deleting '/tmp/dalton-suricata.log'")
+            os.unlink("/tmp/dalton-suricata.log")
+            # touch file since it gets read at Suri startup
+            Path("/tmp/dalton-suricata.log").touch()
+        if os.path.exists("/usr/local/var/run/suricata.pid"):
+            logger.debug("deleting '/usr/local/var/run/suricata.pid'")
+            os.unlink("/usr/local/var/run/suricata.pid")
+
+        SCONTROL.start_suricata_daemon(newconfig)
 
 # Error Class
 class DaltonError(Exception):
@@ -770,40 +823,6 @@ def run_snort():
 #** Suricata Functions **
 #************************
 
-def restart_suricata_socket_mode(newconfig, shutdown_old=True):
-    if SCONTROL is None:
-        # shouldn't happen
-        logger.error("restart_suricata_socket_mode() called but Socket Control is not set up.")
-        raise Exception("Suricata Socket Control not initialized.")
-
-    if shutdown_old:
-        # Suricata should be running, stop it so we can start
-        # a new one with a new config and/or rules
-        try:
-            SCONTROL.connect()
-            SCONTROL.shutdown()
-            SCONTROL.close()
-        except Exception as e:
-            print_error(f"Problem shutting down old Suricata instance in restart_suricata_socket_mode(): {e}")
-
-    if os.path.exists("/tmp/dalton-suricata.log"):
-        os.unlink("/tmp/dalton-suricata.log")
-        # touch file?
-        Path("/tmp/dalton-suricata.log").touch()
-    if os.path.exists("/usr/local/var/run/suricata.pid"):
-        os.unlink("/usr/local/var/run/suricata.pid")
-
-    #TODO
-    # start Suri
-    suricata_command = f"suricata -c {newconfig} -k none --runmode single --unix-socket={SURICATA_SOCKET_NAME} -D"
-    print_debug(f"Starting suricata with the following command:\n{suricata_command}")
-    suri_output_fh = open(JOB_IDS_LOG, "w")
-    subprocess.call(suricata_command, shell = True, stderr=subprocess.STDOUT, stdout=suri_output_fh)
-    suri_output_fh.close()
-    time.sleep(4)
-
-    # but how to determine if it is ready??
-    #suricata -c newconfig -k none --runmode single --unix-socket={SURICATA_SOCKET_NAME}
 
 def run_suricata_sc():
     global SCONTROL
@@ -813,19 +832,21 @@ def run_suricata_sc():
     print_msg("Running pcap(s) thru Suricata; using socket control")
     config_hash = hash_file(IDS_CONFIG_FILE)
     ruleset_hash = hash_file(sorted(glob.glob(os.path.join(JOB_DIRECTORY, "*.rules"))))
-    logger.debug("config_hash: %s, ruleset_hash: %s" % (config_hash, ruleset_hash))
+    logger.debug("NEW config_hash: %s, ruleset_hash: %s" % (config_hash, ruleset_hash))
+    logger.debug("OLD config_hash: %s, ruleset_hash: %s" % (SCONTROL.config_hash, SCONTROL.ruleset_hash))
     if not (ruleset_hash == SCONTROL.ruleset_hash and config_hash == SCONTROL.config_hash):
         # if hashes don't match, shutdown suri via socket, start new suri, update hashes, run
         print_debug("Suricata Socket Control: new hashes found, restarting Suricata.....")
-        shutdown_old = True
-        if SCONTROL.ruleset_hash is None:
-            # Suricata not running, this is the first job since the agent was started.
-            shutdown_old = False
         SCONTROL.ruleset_hash = ruleset_hash
         SCONTROL.config_hash = config_hash
-        restart_suricata_socket_mode(newconfig=IDS_CONFIG_FILE, shutdown_old=shutdown_old)
+        SCONTROL.restart_suricata_socket_mode(newconfig=IDS_CONFIG_FILE)
     else:
-        print_debug("Not restart Suri, just feeding pcaps.........")
+        if SCONTROL.suricata_is_running is False:
+            logger.warn("Suricata thread not running ... starting it back up....")
+            SCONTROL.restart_suricata_socket_mode(newconfig=IDS_CONFIG_FILE)
+        else:
+            print_debug("New job has same config and ruleset hash, not restarting.")
+
     SCONTROL.connect()
     for pcap in PCAP_FILES:
         resp = SCONTROL.send_command(f"pcap-file {pcap} {IDS_LOG_DIRECTORY}")
@@ -841,10 +862,11 @@ def run_suricata_sc():
     sleep_time = .1
     while files_remaining > 0 or current_pcap != "\"None\"":
         time.sleep(sleep_time)
+        # TODO: try/catch ???
         files_remaining = int(SCONTROL.send_command("pcap-file-number"))
         current_pcap = SCONTROL.send_command("pcap-current")
         #logger.debug(f"files_remaining: {files_remaining}, current_pcap: {current_pcap}")
-
+    logger.debug("In run_suricata_sc(): all pcaps done running ... closing connection to socket.")
     SCONTROL.close()
 
 def run_suricata():
@@ -1374,6 +1396,13 @@ while True:
             time.sleep(POLL_INTERVAL)
     except KeyboardInterrupt:
         logger.info("Keyboard Interrupt caught, exiting....")
+        try:
+            if USE_SURICATA_SOCKET_CONTROL:
+                SCONTROL.connect()
+                SCONTROL.shutdown()
+                SCONTROL.close()
+        except:
+            pass
         sys.exit(0)
     except DaltonError as e:
         logger.debug("DaltonError caught (in while True loop):\n%s" % e)
@@ -1392,3 +1421,11 @@ while True:
             logger.error("Agent Error -- Is the Dalton Controller accepting network communications?")
             sys.stdout.flush()
             time.sleep(ERROR_SLEEP_TIME)
+#    finally:
+#        try:
+#            if USE_SURICATA_SOCKET_CONTROL:
+#                SCONTROL.connect()
+#                SCONTROL.shutdown()
+#                SCONTROL.close()
+#        except:
+#            pass
