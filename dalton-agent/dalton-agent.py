@@ -361,6 +361,7 @@ class SocketController:
             self.ruleset_hash = None
             self.config_hash = None
             self.suricata_is_running = False
+            self.log_offset = 0
         except Exception as e:
             print_error("Problem initializing Suricata socket control: %s" % e)
 
@@ -417,15 +418,35 @@ class SocketController:
         # start Suri
         suricata_command = f"suricata -c {config} -k none --runmode single --unix-socket={SURICATA_SOCKET_NAME} -D"
         print_debug(f"Starting suricata thread with the following command:\n{suricata_command}")
-    #    with open(JOB_IDS_LOG, "w") as suri_output_fh:
-    #    subprocess.call(suricata_command, shell = True, stderr=subprocess.STDOUT, stdout=suri_output_fh)
-    #    subprocess.call(suricata_command, shell = True)
         # use Popen() instead of call() since the latter blocks which isn't what we want
         subprocess.Popen(suricata_command, shell = True)
         # wait for Suricata to be ready to process traffic before returning
         # tail /tmp/dalton-suricata.log, look for "engine started."
-        time.sleep(4)
+        with open('/tmp/dalton-suricata.log', 'r') as suri_output_fh:
+            logger.debug("tailing '/tmp/dalton-suricata.log' so see when engine has startup up fully")
+            now = datetime.datetime.now()
+            keep_looking = True
+            while keep_looking:
+                line = suri_output_fh.readline()
+                if not line or not line.endswith('\n'):
+                    time.sleep(0.1)
+                    continue
+                elif "<Error>" in line:
+                    self.suricata_is_running = False
+                    print_error(f"Problem starting Suricata daemon: {line}")
+                elif "engine started" in line:
+                    self.log_offset = suri_output_fh.tell()
+                    break
+                else:
+                    new_now = datetime.datetime.now()
+                    if (new_now - now).seconds > 120:
+                        # timeout
+                        self.suricata_is_running = False
+                        print_error("Timeout waiting on Suricata daemon to start.")
+
+        shutil.copyfile("/tmp/dalton-suricata.log", JOB_IDS_LOG)
         self.suricata_is_running = True
+        logger.debug("Suricata daemon started")
 
     def restart_suricata_socket_mode(self, newconfig):
         if self.suricata_is_running is True:
