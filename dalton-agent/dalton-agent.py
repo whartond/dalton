@@ -360,8 +360,8 @@ class SocketController:
             self.sc = suricatasc.SuricataSC(socket_path)
             self.ruleset_hash = None
             self.config_hash = None
+            self.reset_logging()
             self.suricata_is_running = False
-            self.log_offset = 0
         except Exception as e:
             print_error("Problem initializing Suricata socket control: %s" % e)
 
@@ -392,8 +392,10 @@ class SocketController:
     def shutdown(self):
         """Shutdown Suricata process."""
         logger.debug("Shutting down Suricata Unix Socket instance.")
-        self.send_command("shutdown")
-        # TODO delete log /tmp/dalton-suricata.log
+        try:
+            self.send_command("shutdown")
+        except Exception as e:
+            print_error(f"Problem shutting down Suricata instance in shutdown(): {e}")
 
     def stop_suricata_daemon(self):
         """Stop Suricata daemon using socket control."""
@@ -410,9 +412,20 @@ class SocketController:
             print_error(f"Problem shutting down old Suricata instance in stop_suricata_daemon(): {e}")
         self.suricata_is_running = False
 
+    def reset_logging(self):
+        if os.path.exists("/tmp/dalton-suricata.log"):
+            logger.debug("deleting '/tmp/dalton-suricata.log'")
+            os.unlink("/tmp/dalton-suricata.log")
+        # touch file since it gets read at Suri startup in daemon mode and
+        # there could be a race condition
+        Path("/tmp/dalton-suricata.log").touch()
+        self.log_offset = 0
+        self.suri_startup_log = ''
+
     def start_suricata_daemon(self, config):
         """Start Suricata thread with Unix Socket listener."""
         logger.debug("start_suricata_daemon() called")
+        self.reset_logging()
         if config is None:
             print_error("start_suricata_daemon() called but not initialized.")
         # start Suri
@@ -431,12 +444,13 @@ class SocketController:
                 if not line or not line.endswith('\n'):
                     time.sleep(0.1)
                     continue
-                elif "<Error>" in line:
-                    self.suricata_is_running = False
-                    print_error(f"Problem starting Suricata daemon: {line}")
-                elif "engine started" in line:
+                self.suri_startup_log += line
+                if "engine started" in line:
                     self.log_offset = suri_output_fh.tell()
                     break
+                if "<Error>" in line:
+                    self.suricata_is_running = False
+                    print_error(f"Problem starting Suricata daemon: {line}")
                 else:
                     new_now = datetime.datetime.now()
                     if (new_now - now).seconds > 120:
@@ -444,7 +458,6 @@ class SocketController:
                         self.suricata_is_running = False
                         print_error("Timeout waiting on Suricata daemon to start.")
 
-        shutil.copyfile("/tmp/dalton-suricata.log", JOB_IDS_LOG)
         self.suricata_is_running = True
         logger.debug("Suricata daemon started")
 
@@ -454,11 +467,6 @@ class SocketController:
             # a new one with a new config and/or rules
             self.stop_suricata_daemon()
 
-        if os.path.exists("/tmp/dalton-suricata.log"):
-            logger.debug("deleting '/tmp/dalton-suricata.log'")
-            os.unlink("/tmp/dalton-suricata.log")
-            # touch file since it gets read at Suri startup
-            Path("/tmp/dalton-suricata.log").touch()
         if os.path.exists("/usr/local/var/run/suricata.pid"):
             logger.debug("deleting '/usr/local/var/run/suricata.pid'")
             os.unlink("/usr/local/var/run/suricata.pid")
@@ -573,13 +581,22 @@ def send_results():
 
     # populate ids log
     results = ''
-    fh = open(JOB_IDS_LOG, 'r')
-    results = fh.read()
+    if USE_SURICATA_SOCKET_CONTROL:
+        results = f"{SCONTROL.suri_startup_log}\n-----\n\n"
+        with open("/tmp/dalton-suricata.log", 'r') as fh:
+            fh.seek(SCONTROL.log_offset, 0)
+            results += fh.read()
+            if KEEP_JOB_FILES:
+                with open(JOB_IDS_LOG, 'w') as fhw:
+                    fhw.write(results)
+            SCONTROL.log_offset = fh.tell()
+    else:
+        with open(JOB_IDS_LOG, 'r') as fh:
+            results = fh.read()
     # make sure we have only ASCII
     results_dict['ids'] = ""
     for line in results:
         results_dict['ids'] += nonprintable_re.sub(hexescape, line)
-    fh.close()
 
     # populate alert
     fh = open(JOB_ALERT_LOG, 'r')
