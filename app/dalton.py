@@ -1532,7 +1532,7 @@ def page_coverage_summary():
                 llist =[list(config['logging']['outputs'][i].keys())[0] for i in range(0, len(config['logging']['outputs']))]
                 olist =[list(config['outputs'][i].keys())[0] for i in range(0, len(config['outputs']))]
 
-                # Suricata log?AAA
+                # Suricata log. Hard code location for use in socket control
                 slog_level = "info"
                 if 'file' in llist:
                     try:

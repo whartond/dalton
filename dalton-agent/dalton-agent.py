@@ -50,11 +50,14 @@ from logging.handlers import RotatingFileHandler
 from distutils.version import LooseVersion
 import binascii
 import hashlib
-import threading
 from pathlib import Path
 
 # urllib2 in Python < 2.6 doesn't support setting a timeout so doing it like this
 socket.setdefaulttimeout(120)
+
+# Hard code this since Controller hard codes it.
+# Used particularly for logging suri output when using socket control
+suricata_logging_outputs_file = "/tmp/dalton-suricata.log"
 
 #*********************************
 #*** Parse Comand Line Options ***
@@ -401,9 +404,9 @@ class SocketController:
         """Stop Suricata daemon using socket control."""
         logger.debug("stop_suricata_daemon() called")
         if self.suricata_is_running is False:
-            logger.warn("stop_suricata_daemon() called but Suricata my not be running.")
-            # Suricata daemon is running; stop it so we can start
-            # a new one with a new config and/or rules
+            logger.warn("stop_suricata_daemon() called but Suricata may not be running."
+                        " Still attempting shutdown but it will likely error."
+                       )
         try:
             self.connect()
             self.shutdown()
@@ -413,12 +416,12 @@ class SocketController:
         self.suricata_is_running = False
 
     def reset_logging(self):
-        if os.path.exists("/tmp/dalton-suricata.log"):
-            logger.debug("deleting '/tmp/dalton-suricata.log'")
-            os.unlink("/tmp/dalton-suricata.log")
+        if os.path.exists(suricata_logging_outputs_file):
+            logger.debug("deleting '%s'" % suricata_logging_outputs_file)
+            os.unlink(suricata_logging_outputs_file)
         # touch file since it gets read at Suri startup in daemon mode and
         # there could be a race condition
-        Path("/tmp/dalton-suricata.log").touch()
+        Path(suricata_logging_outputs_file).touch()
         self.log_offset = 0
         self.suri_startup_log = ''
 
@@ -434,9 +437,10 @@ class SocketController:
         # use Popen() instead of call() since the latter blocks which isn't what we want
         subprocess.Popen(suricata_command, shell = True)
         # wait for Suricata to be ready to process traffic before returning
-        # tail /tmp/dalton-suricata.log, look for "engine started."
-        with open('/tmp/dalton-suricata.log', 'r') as suri_output_fh:
-            logger.debug("tailing '/tmp/dalton-suricata.log' so see when engine has startup up fully")
+        # tail suricata_logging_outputs_file (default /tmp/dalton-suricata.log),
+        # look for "engine started."
+        with open(suricata_logging_outputs_file, 'r') as suri_output_fh:
+            logger.debug("tailing '%s' so see when engine has startup up fully" % suricata_logging_outputs_file)
             now = datetime.datetime.now()
             keep_looking = True
             while keep_looking:
@@ -583,7 +587,7 @@ def send_results():
     results = ''
     if USE_SURICATA_SOCKET_CONTROL:
         results = f"{SCONTROL.suri_startup_log}\n-----\n\n"
-        with open("/tmp/dalton-suricata.log", 'r') as fh:
+        with open(suricata_logging_outputs_file, 'r') as fh:
             fh.seek(SCONTROL.log_offset, 0)
             results += fh.read()
             if KEEP_JOB_FILES:
@@ -1428,6 +1432,8 @@ while True:
             # remove job directory and contained files
             if not KEEP_JOB_FILES:
                 shutil.rmtree(JOB_DIRECTORY)
+                if not USE_SURICATA_SOCKET_CONTROL and os.path.exists(suricata_logging_outputs_file):
+                    os.unlink(suricata_logging_outputs_file)
             logger.info("Job %s complete" % JOB_ID)
             JOB_ID = None
         else:
