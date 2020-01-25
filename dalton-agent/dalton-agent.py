@@ -373,6 +373,7 @@ class SocketController:
             logger.debug("Connecting to socket...")
             self.sc.connect()
         except Exception as e:
+            self.suricata_is_running = False
             print_error("Problem connecting to Unix socket: %s" % e)
 
     def send_command(self, command):
@@ -399,6 +400,9 @@ class SocketController:
             self.send_command("shutdown")
         except Exception as e:
             print_error(f"Problem shutting down Suricata instance in shutdown(): {e}")
+        finally:
+            self.suricata_is_running = False
+
 
     def stop_suricata_daemon(self):
         """Stop Suricata daemon using socket control."""
@@ -413,7 +417,8 @@ class SocketController:
             self.close()
         except Exception as e:
             print_error(f"Problem shutting down old Suricata instance in stop_suricata_daemon(): {e}")
-        self.suricata_is_running = False
+        finally:
+            self.suricata_is_running = False
 
     def reset_logging(self):
         if os.path.exists(suricata_logging_outputs_file):
@@ -453,12 +458,16 @@ class SocketController:
                     self.log_offset = suri_output_fh.tell()
                     break
                 if "<Error>" in line:
+                    # submit_job() erorrs out before JOB_IDS_LOG is copied so
+                    # copy over output log to JOB_IDS_LOG here so it gets returned
+                    shutil.copyfile(suricata_logging_outputs_file, JOB_IDS_LOG)
                     self.suricata_is_running = False
                     print_error(f"Problem starting Suricata daemon: {line}")
                 else:
                     new_now = datetime.datetime.now()
                     if (new_now - now).seconds > 120:
                         # timeout
+                        shutil.copyfile(suricata_logging_outputs_file, JOB_IDS_LOG)
                         self.suricata_is_running = False
                         print_error("Timeout waiting on Suricata daemon to start.")
 
@@ -585,18 +594,8 @@ def send_results():
 
     # populate ids log
     results = ''
-    if USE_SURICATA_SOCKET_CONTROL:
-        results = f"{SCONTROL.suri_startup_log}\n-----\n\n"
-        with open(suricata_logging_outputs_file, 'r') as fh:
-            fh.seek(SCONTROL.log_offset, 0)
-            results += fh.read()
-            if KEEP_JOB_FILES:
-                with open(JOB_IDS_LOG, 'w') as fhw:
-                    fhw.write(results)
-            SCONTROL.log_offset = fh.tell()
-    else:
-        with open(JOB_IDS_LOG, 'r') as fh:
-            results = fh.read()
+    with open(JOB_IDS_LOG, 'r') as fh:
+        results = fh.read()
     # make sure we have only ASCII
     results_dict['ids'] = ""
     for line in results:
@@ -1015,9 +1014,9 @@ def check_for_errors(tech):
         ids_log_fh = open(JOB_IDS_LOG, "r")
         for line in ids_log_fh:
             if tech.startswith('suri'):
-                if (" - <Error> - " in line or line.startswith("ERROR") or line.startswith("Failed to parse configuration file")):
+                if ("<Error>" in line or line.startswith("ERROR") or line.startswith("Failed to parse configuration file")):
                     error_lines.append(line)
-                    if "bad dump file format" in line:
+                    if "bad dump file format" in line or "unknown file format" in line:
                         error_lines.append("Bad pcap file(s) submitted to Suricata. Pcap files should be in libpcap format (pcapng is not supported in older Suricata versions).\n")
             elif tech.startswith('snort'):
                 if "ERROR:" in line or "FATAL" in line or "Fatal Error" in line or "Segmentation fault" in line or line.startswith("Error "):
@@ -1355,6 +1354,23 @@ def submit_job(job_id, job_directory):
         process_performance_logs()
     else:
         print_debug("Performance tracking disabled, not processing performance logs")
+
+    # Populate JOB_IDS_LOG accordingly for Suricata socket control
+    if USE_SURICATA_SOCKET_CONTROL:
+        with open(JOB_IDS_LOG, 'w') as fhout:
+            if SCONTROL.suricata_is_running is False and SCONTROL.log_offset == 0:
+                # this means suri Errored at startup; pass here and just
+                # the whole output file will be included later, otherwise
+                # there will be duplicate output in the returned log
+                pass
+            else:
+                # include initial suricata startup output
+                fhout.write(f"{SCONTROL.suri_startup_log}\n-----\n\n")
+            with open(suricata_logging_outputs_file, 'r') as fh:
+                # include relevant part of suricata log from this job
+                fh.seek(SCONTROL.log_offset, 0)
+                fhout.write(fh.read())
+                SCONTROL.log_offset = fh.tell()
 
     # check IDS output for error messages not identified and/or
     # handled elsewhere. Applies to Suri and Snort for now
