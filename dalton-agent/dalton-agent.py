@@ -59,6 +59,10 @@ socket.setdefaulttimeout(120)
 # Used particularly for logging suri output when using socket control
 suricata_logging_outputs_file = "/tmp/dalton-suricata.log"
 
+# Also hard-coded; no need to expose but putting in variable for convenience.
+suricata_sc_pid_file = "/usr/local/var/run/suricata.pid"
+
+
 #*********************************
 #*** Parse Comand Line Options ***
 #*********************************
@@ -275,8 +279,15 @@ else:
     sensor_config_variable = f"SENSOR_CONFIG={SENSOR_CONFIG}&"
 
 if not SENSOR_ENGINE.startswith("suricata"):
-    #TODO: check for supported Suricata version
     USE_SURICATA_SOCKET_CONTROL = False
+
+if USE_SURICATA_SOCKET_CONTROL:
+    # Socket Control supported in Suricata 1.4 and later
+    if float('.'.join(eng_ver.split('.')[:2])) < 1.4:
+        msg = f"Suricata Socket Control supported in version 1.4 and later. Version {eng_ver} too old. Disabling Suricata Socket Control Mode."
+        logger.warn(msg)
+        print_debug(msg)
+        USE_SURICATA_SOCKET_CONTROL = False
 
 if USE_SURICATA_SOCKET_CONTROL:
     if os.path.isdir(SURICATA_SC_PYTHON_MODULES):
@@ -374,11 +385,13 @@ class SocketController:
             self.sc.connect()
         except Exception as e:
             self.suricata_is_running = False
+            logger.debug("%s" % traceback.format_exc())
             print_error("Problem connecting to Unix socket: %s" % e)
 
     def send_command(self, command):
         try:
             cmd, arguments = self.sc.parse_command(command)
+            #logger.debug("in send_command():\n\tcmd: %s\n\targuments: %s" % (cmd, arguments))
             cmdret = self.sc.send_command(cmd, arguments)
         except Exception as e:
             print_error("Problem parsing/sending command: %s" % e)
@@ -407,7 +420,7 @@ class SocketController:
     def stop_suricata_daemon(self):
         """Stop Suricata daemon using socket control."""
         logger.debug("stop_suricata_daemon() called")
-        if self.suricata_is_running is False:
+        if not self.suricata_is_running:
             logger.warn("stop_suricata_daemon() called but Suricata may not be running."
                         " Still attempting shutdown but it will likely error."
                        )
@@ -420,7 +433,9 @@ class SocketController:
         finally:
             self.suricata_is_running = False
 
-    def reset_logging(self):
+    def reset_logging(self, delete_pid_file = True):
+        """ Reset log files and remove pid file if exists. """
+        # logging
         if os.path.exists(suricata_logging_outputs_file):
             logger.debug("deleting '%s'" % suricata_logging_outputs_file)
             os.unlink(suricata_logging_outputs_file)
@@ -429,6 +444,12 @@ class SocketController:
         Path(suricata_logging_outputs_file).touch()
         self.log_offset = 0
         self.suri_startup_log = ''
+
+        # pid file
+        if delete_pid_file:
+            if os.path.exists(suricata_sc_pid_file):
+                logger.debug("deleting '%s'" % suricata_sc_pid_file)
+                os.unlink(suricata_sc_pid_file)
 
     def start_suricata_daemon(self, config):
         """Start Suricata thread with Unix Socket listener."""
@@ -475,15 +496,10 @@ class SocketController:
         logger.debug("Suricata daemon started")
 
     def restart_suricata_socket_mode(self, newconfig):
-        if self.suricata_is_running is True:
+        if self.suricata_is_running:
             # Suricata daemon is running; stop it so we can start
             # a new one with a new config and/or rules
             self.stop_suricata_daemon()
-
-        if os.path.exists("/usr/local/var/run/suricata.pid"):
-            logger.debug("deleting '/usr/local/var/run/suricata.pid'")
-            os.unlink("/usr/local/var/run/suricata.pid")
-
         SCONTROL.start_suricata_daemon(newconfig)
 
 # Error Class
@@ -875,15 +891,18 @@ def run_suricata_sc():
     ruleset_hash = hash_file(sorted(glob.glob(os.path.join(JOB_DIRECTORY, "*.rules"))))
     logger.debug("NEW config_hash: %s, ruleset_hash: %s" % (config_hash, ruleset_hash))
     logger.debug("OLD config_hash: %s, ruleset_hash: %s" % (SCONTROL.config_hash, SCONTROL.ruleset_hash))
-    if not (ruleset_hash == SCONTROL.ruleset_hash and config_hash == SCONTROL.config_hash):
+    if (not (ruleset_hash == SCONTROL.ruleset_hash and config_hash == SCONTROL.config_hash)) \
+        and SCONTROL.suricata_is_running:
         # if hashes don't match, shutdown suri via socket, start new suri, update hashes, run
         print_debug("Suricata Socket Control: new hashes found, restarting Suricata.....")
         SCONTROL.ruleset_hash = ruleset_hash
         SCONTROL.config_hash = config_hash
         SCONTROL.restart_suricata_socket_mode(newconfig=IDS_CONFIG_FILE)
     else:
-        if SCONTROL.suricata_is_running is False:
+        if not SCONTROL.suricata_is_running:
             logger.warn("Suricata thread not running ... starting it back up....")
+            SCONTROL.ruleset_hash = ruleset_hash
+            SCONTROL.config_hash = config_hash
             SCONTROL.restart_suricata_socket_mode(newconfig=IDS_CONFIG_FILE)
         else:
             print_debug("New job has same config and ruleset hash, not restarting.")
@@ -1358,7 +1377,7 @@ def submit_job(job_id, job_directory):
     # Populate JOB_IDS_LOG accordingly for Suricata socket control
     if USE_SURICATA_SOCKET_CONTROL:
         with open(JOB_IDS_LOG, 'w') as fhout:
-            if SCONTROL.suricata_is_running is False and SCONTROL.log_offset == 0:
+            if (not SCONTROL.suricata_is_running) and SCONTROL.log_offset == 0:
                 # this means suri Errored at startup; pass here and just
                 # the whole output file will be included later, otherwise
                 # there will be duplicate output in the returned log
