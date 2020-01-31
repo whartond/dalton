@@ -129,9 +129,20 @@ else:
     file_handler.setLevel(logging.INFO)
     logger.setLevel(logging.INFO)
 
+
 #************************************************
 #** Helper Functions to populate config values **
 #************************************************
+def prefix_strip(mystring, prefixes=["rust_"]):
+    """ strip passed in prefixes from the beginning of passed in string and return it
+    """
+    if not isinstance(prefixes, list):
+        prefixes = [prefixes]
+    for prefix in prefixes:
+        if mystring.startswith(prefix):
+            return mystring[len(prefix):]
+    return mystring
+
 def find_file(name):
     """Returns full path to file if found on system."""
     ret_path = None
@@ -283,15 +294,17 @@ if not SENSOR_ENGINE.startswith("suricata"):
 
 if USE_SURICATA_SOCKET_CONTROL:
     # Socket Control supported in Suricata 1.4 and later
-    if float('.'.join(eng_ver.split('.')[:2])) < 1.4:
-        msg = f"Suricata Socket Control supported in version 1.4 and later. Version {eng_ver} too old. Disabling Suricata Socket Control Mode."
+    if float('.'.join(prefix_strip(eng_ver).split('.')[:2])) < 3.0:
+        msg = f"Dalton Agent does not support Suricata Socket Control for Suricata versions before 3.0. This is running Suricata version {eng_ver}.  Disabling Suricata Socket Control Mode."
         logger.warn(msg)
-        print_debug(msg)
         USE_SURICATA_SOCKET_CONTROL = False
 
 if USE_SURICATA_SOCKET_CONTROL:
     if os.path.isdir(SURICATA_SC_PYTHON_MODULES):
         sys.path.append(SURICATA_SC_PYTHON_MODULES)
+    elif os.path.isdir(os.path.abspath(os.path.join(SURICATA_SC_PYTHON_MODULES, '..', 'scripts', 'suricatasc', 'src'))):
+        # older Suricata versions had suricatasc in "scripts" directory, not "python" directory
+        sys.path.append(os.path.abspath(os.path.join(SURICATA_SC_PYTHON_MODULES, '..', 'scripts', 'suricatasc', 'src')))
     # Used as Suricata default-log-dir when in SC mode
     os.makedirs(os.path.dirname(SURICATA_SOCKET_NAME), exist_ok=True)
 
@@ -360,13 +373,44 @@ URLLIB_TIMEOUT = 120
 # set later
 SCONTROL = None
 
+#****************#
+#*** Job Logs ***#
+#****************#
+# functions for populating job logs
+def print_error(msg):
+    if JOB_ERROR_LOG:
+        fh = open(JOB_ERROR_LOG, "a")
+        fh.write("%s\n" % msg)
+        fh.close()
+    else:
+        logger.debug("print_error() called but no JOB_ERROR_LOG exists")
+    print_msg("ERROR!")
+    print_debug("ERROR:\n%s" % msg)
+    # throw error
+    raise DaltonError(msg)
+
+def print_msg(msg):
+    print_debug(msg)
+    # send message
+    logger.debug(msg)
+    send_update(msg, JOB_ID)
+
+def print_debug(msg):
+    global JOB_DEBUG_LOG
+    if JOB_DEBUG_LOG:
+        fh = open(JOB_DEBUG_LOG, "a")
+        fh.write("*****\n%s\n" % msg)
+        fh.close()
+    else:
+        logger.debug("print_debug() called but no JOB_DEBUG_LOG exists")
+
 #**********************
 #*** Custom Classes ***
 #**********************
 
 class SocketController:
     """ Basically a wrapper for Suricata socket control.
-        Also handles start/restar of Suricata which is
+        Also handles start/restart of Suricata which is
         run in daemon mode.
     """
     def __init__(self, socket_path):
@@ -711,34 +755,6 @@ def error_post_results(error_msg):
     json_results_dict = json.dumps(results_dict)
     payload = {'json_data': json_results_dict}
     post_results(payload)
-
-def print_error(msg):
-    if JOB_ERROR_LOG:
-        fh = open(JOB_ERROR_LOG, "a")
-        fh.write("%s\n" % msg)
-        fh.close()
-    else:
-        logger.debug("print_error() called but no JOB_ERROR_LOG exists")
-    print_msg("ERROR!")
-    print_debug("ERROR:\n%s" % msg)
-    # throw error
-    raise DaltonError(msg)
-
-def print_msg(msg):
-    print_debug(msg)
-    # send message
-    logger.debug(msg)
-    send_update(msg, JOB_ID)
-
-def print_debug(msg):
-    global JOB_DEBUG_LOG
-    if JOB_DEBUG_LOG:
-        fh = open(JOB_DEBUG_LOG, "a")
-        fh.write("*****\n%s\n" % msg)
-        fh.close()
-    else:
-        logger.debug("print_debug() called but no JOB_DEBUG_LOG exists")
-
 
 # process alert output from Snort
 def process_snort_alerts():
