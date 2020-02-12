@@ -1312,6 +1312,15 @@ def page_coverage_summary():
                 delete_temp_files(job_id)
                 return render_template('/dalton/error.html', jid='', msg=["Could not merge pcaps.  Error:", f"{e}"])
 
+        # get use Suricata Socket Control option
+        bSuricataSC = False
+        if sensor_tech.startswith("suri") :
+            try:
+                if request.form.get("optionUseSC"):
+                    bSuricataSC = True
+            except:
+                pass
+
         # get enable all rules option
         bEnableAllRules = False
         if request.form.get('optionProdRuleset') and request.form.get('optionEnableAllRules'):
@@ -1890,6 +1899,7 @@ def page_coverage_summary():
                 json_job['get-engine-stats'] = bGetEngineStats
                 json_job['teapot-job'] = bteapotJob
                 json_job['split-pcaps'] = bSplitCap
+                json_job['use-suricatasc'] = bSuricataSC
                 json_job['alert-detailed'] = bGetAlertDetailed
                 json_job['get-fast-pattern'] = bGetFastPattern
                 json_job['get-other-logs'] = bGetOtherLogs

@@ -510,7 +510,7 @@ class SocketController:
         # tail suricata_logging_outputs_file (default /tmp/dalton-suricata.log),
         # look for "engine started."
         with open(suricata_logging_outputs_file, 'r') as suri_output_fh:
-            logger.debug("tailing '%s' so see when engine has startup up fully" % suricata_logging_outputs_file)
+            logger.debug("tailing '%s' to see when engine has startup up fully" % suricata_logging_outputs_file)
             now = datetime.datetime.now()
             keep_looking = True
             while keep_looking:
@@ -1213,6 +1213,18 @@ def submit_job(job_id, job_directory):
             manifest_data.append(json.loads(line))
         manifest_file.close()
     print_debug("manifest.json: %s" % manifest_data)
+
+    # use Suricata Socket Control (Suricata only)
+    if SENSOR_ENGINE.startswith('suri'):
+        try:
+            useSuricataSC = manifest_data[0]['use-suricatasc']
+            if useSuricataSC != USE_SURICATA_SOCKET_CONTROL:
+                msg = f"Changing Suricata Socket Control option to '{useSuricataSC}' per job settings."
+                logger.info(msg)
+                print_debug(msg)
+                USE_SURICATA_SOCKET_CONTROL = useSuricataSC
+        except Exception as e:
+            logger.warn("Problem getting 'use-suricatasc' value from manifest: %s" % e)
 
     trackPerformance = False
     try:
