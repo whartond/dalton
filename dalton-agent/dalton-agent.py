@@ -1340,7 +1340,7 @@ def submit_job(job_id, job_directory):
         suri_yaml_fh.write("\n")
         # set default-rule-path; this is stripped out when the controller built
         # the job with the expectation that it be added here.
-        print_debug("adding default-rule-path to yaml:\n%s\n" % '\n'.join(IDS_RULES_FILES))
+        print_debug("adding default-rule-path to yaml:\n%s" % '\n'.join(IDS_RULES_FILES))
         suri_yaml_fh.write("default-rule-path: %s\n" % JOB_DIRECTORY)
         suri_yaml_fh.close()
         # reading multiple pcaps added in Suricata 4.1
