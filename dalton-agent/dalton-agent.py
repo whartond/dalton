@@ -326,7 +326,7 @@ logger.info("\tSENSOR_CONFIG: %s" % SENSOR_CONFIG)
 logger.info("\tIDS_BINARY: %s" % IDS_BINARY)
 logger.info("\tTCPDUMP_BINARY: %s" % TCPDUMP_BINARY)
 if SENSOR_ENGINE.startswith("suricata"):
-    logger.info("\tUSE_SURICATA_SOCKET_CONTROL: %s" % USE_SURICATA_SOCKET_CONTROL)
+    logger.info("\tSURICATA_SOCKET_CONTROL Support: %s" % USE_SURICATA_SOCKET_CONTROL)
 
 # just in case the Dalton Agent is set to use a proxy, exclude "dalton_web" which is the
 # web server container and communication with it shouldn't go thru a proxy; if the
