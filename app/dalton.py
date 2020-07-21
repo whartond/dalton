@@ -1448,7 +1448,7 @@ def page_coverage_summary():
                         return render_template('/dalton/error.html', jid='', msg=["Invalid rule, last rule option must end with semicolon.  Rule:",  f"{line}"])
 
                     # add sid if not included
-                    if not re.search(r'(\s|\x3B)sid\s*\:\s*\d+\s*\x3B', line) and not line.startswith("event_filter") and not line.startswith("threshold") \
+                    if not re.search(r'(^[^\x28]+\x28\s*|\s|\x3B)sid\s*\:\s*\d+\s*\x3B', line) and not line.startswith("event_filter") and not line.startswith("threshold") \
                         and not line.startswith("suppress") and not line.startswith("rate_filter") and not line.startswith("detection_filter"):
                         # if no sid in rule, fix automatically instead of throwing an error
                         #return render_template('/dalton/error.html', jid='', msg=["\'sid\' not specified in rule, this will error.  Rule:", "%s" % line])
