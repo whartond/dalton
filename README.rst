@@ -312,7 +312,8 @@ the ``suricatasc`` module was not Python 3 compatible until Suricata
 3.0 so that is the earliest version Dalton supports.
 
 -  | **Problems with Suricata Socket Control Mode**
-   | There are some known issues with Suricata Socket Control.  If you experience
+   | There are some known issues with Suricata Socket Control, not related to Dalton.
+     If you experience
      problems with it, try running the job with this option disabled.
 
    -  | **Sample Issues**
