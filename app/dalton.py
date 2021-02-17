@@ -2104,26 +2104,26 @@ def controller_api_get_job_data(jid, requested_data):
             else:
                 ret_data = None
                 if requested_data == "all":
-                    # 'all' returns a dict of all data (other values just return a string)
+                    # 'all' returns a structure of all data (other values just return a string)
                     ret_data = {}
                     try:
                         for key in valid_keys:
                             if key == "all":
                                 continue
-                            elif key == "other_logs":
-                                ret_data[key] = json.loads(r.get("%s-%s" % (jid, key)))
-                            else:
-                                ret_data[key] = r.get("%s-%s" % (jid, key))
-                    except:
+                            ret_data[key] = r.get("%s-%s" % (jid, key))
+                            if key == "other_logs" and len(ret_data[key]) > 0:
+                                ret_data[key] = json.loads(ret_data[key])
+                    except Exception as e:
                         json_response["error"] = True
                         json_response["error_msg"] = "Unexpected error: cannot pull '%s' data for Job ID %s" % (requested_data, jid)
+                        logger.debug(f"{json_response['error_msg']}: {e}")
                 else:
                     try:
                         ret_data = r.get("%s-%s" % (jid, requested_data))
                     except:
                         json_response["error"] = True
                         json_response["error_msg"] = "Unexpected error: cannot pull '%s' for jobid %s," % (requested_data, jid)
-                    if requested_data == "other_logs":
+                    if requested_data == "other_logs" and len(ret_data) > 0:
                         ret_data = json.loads(ret_data)
                 json_response["data"] = ret_data
     return json_response
