@@ -670,7 +670,7 @@ in the Content-Disposition header that prompt browsers to download/save the file
    This is the same as what is displayed in the "Keyword Perf" tab in the job
    results page.
 
--  **other\_logs** - *Deprecated* - Other logs from the job (Suricata only).
+-  **other\_logs** - *deprecated* - Other logs from the job (Suricata only).
    This is returned as key/value pairs with the key being the
    name of the log and the value being the contents of the log.
 
