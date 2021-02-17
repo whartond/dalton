@@ -2096,11 +2096,30 @@ def controller_api_get_job_data(jid, requested_data):
             json_response["error"] = True
             json_response["error_msg"] = "Job ID %s does not exist" % jid
         else:
-            # inspect the requested_data value and return the needful :)
+            # inspect the requested_data value and return the data
             # check 'valid_keys'
             if requested_data not in valid_keys:
-                json_response["error"] = True
-                json_response["error_msg"] = "value '%s' invalid" % requested_data
+                # check other_logs
+                key_found = False
+                try:
+                    ologs = r.get("%s-%s" % (jid, 'other_logs'))
+                    if len(ologs) > 0:
+                        ologs = json.loads(ologs)
+                        for k in ologs.keys():
+                            kkey = k.lower().strip()
+                            kkey = kkey.replace(' ', '_')
+                            if kkey == requested_data:
+                                json_response["data"] = ologs[k]
+                                key_found = True
+                                break
+                    if not key_found:
+                        json_response["error"] = True
+                        json_response["error_msg"] = f"No data found for '{requested_data}' for Job ID {jid}"
+
+                except Exception as e:
+                    json_response["error"] = True
+                    json_response["error_msg"] = "Unexpected error1: cannot pull '%s' data for Job ID %s" % (requested_data, jid)
+                    logger.debug(f"{json_response['error_msg']}: {e}")
             else:
                 ret_data = None
                 if requested_data == "all":
@@ -2110,9 +2129,18 @@ def controller_api_get_job_data(jid, requested_data):
                         for key in valid_keys:
                             if key == "all":
                                 continue
-                            ret_data[key] = r.get("%s-%s" % (jid, key))
-                            if key == "other_logs" and len(ret_data[key]) > 0:
-                                ret_data[key] = json.loads(ret_data[key])
+                            elif key == "other_logs":
+                                # go thru other_logs struct and make each top-level entries in the response
+                                ologs = r.get("%s-%s" % (jid, key))
+                                if len(ologs) > 0:
+                                    ologs = json.loads(ologs)
+                                    for k in ologs.keys():
+                                        kdata = ologs[k]
+                                        k = k.lower().strip()
+                                        k = k.replace(' ', '_')
+                                        ret_data[k] = kdata
+                            else:
+                                ret_data[key] = r.get("%s-%s" % (jid, key))
                     except Exception as e:
                         json_response["error"] = True
                         json_response["error_msg"] = "Unexpected error: cannot pull '%s' data for Job ID %s" % (requested_data, jid)
