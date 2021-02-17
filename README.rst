@@ -670,7 +670,7 @@ in the Content-Disposition header that prompt browsers to download/save the file
    This is the same as what is displayed in the "Keyword Perf" tab in the job
    results page.
 
--  **other\_logs** - Other logs from the job (Suricata only). 
+-  **other\_logs** - *Deprecated* - Other logs from the job (Suricata only).
    This is returned as key/value pairs with the key being the
    name of the log and the value being the contents of the log.
 
@@ -1313,7 +1313,7 @@ Frequently Asked Questions
      the pcaps into a single file before making the job available for Agents to
      grab. By default, the pcap merging is done with
      `mergecap <https://www.wireshark.org/docs/man-pages/mergecap.html>`__.
-     For more details see `Packet Captures <#packet-captures>`__.
+     For more details see `Packet Captures <#Packet-Captures>`__.
 
 #. | **Can I have more than one Agent with the same engine/version? For example, can
      I have multiple Agents running Suricata 4.0.1?**
