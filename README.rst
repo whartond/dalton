@@ -673,7 +673,10 @@ in the Content-Disposition header that prompt browsers to download/save the file
 
 -  **other\_logs** - *deprecated* - Other logs from the job (Suricata only).
    This is returned as key/value pairs with the key being the
-   name of the log and the value being the contents of the log.
+   name of the log and the value being the contents of the log. This key
+   is deprecated and is not included in the ``all`` key response. The contents
+   of ``other_logs``, e.g. "http_log", "tls_log", etc., can and should be
+   accessed directly.
 
 -  **packet\_stats** - Statistics from the pcap(s) (Suricata only).  This is the
    same as what is displayed in the "Engine Stats" tab in the job results page.
