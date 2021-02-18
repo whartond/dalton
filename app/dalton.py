@@ -2075,7 +2075,10 @@ def page_about_default():
 def controller_api_get_job_data(jid, requested_data):
     global r
     # add to as necessary
-    valid_keys = ('alert', 'alert_detailed', 'ids', 'other_logs', 'eve', 'perf', 'tech', 'error', 'time', 'statcode', 'debug', 'status', 'submission_time', 'start_time', 'user', 'all')
+    valid_keys = ('alert', 'alert_detailed', 'ids', 'other_logs', 'eve',
+                  'perf', 'tech', 'error', 'time', 'statcode', 'debug',
+                  'status', 'submission_time', 'start_time', 'user', 'all'
+                 )
     json_response = {'error':False, 'error_msg':None, 'data':None}
     # some input validation
     if not validate_jobid(jid):
@@ -2100,7 +2103,6 @@ def controller_api_get_job_data(jid, requested_data):
             # check 'valid_keys'
             if requested_data not in valid_keys:
                 # check other_logs
-                key_found = False
                 try:
                     ologs = r.get("%s-%s" % (jid, 'other_logs'))
                     if len(ologs) > 0:
@@ -2110,9 +2112,8 @@ def controller_api_get_job_data(jid, requested_data):
                             kkey = kkey.replace(' ', '_')
                             if kkey == requested_data:
                                 json_response["data"] = ologs[k]
-                                key_found = True
                                 break
-                    if not key_found:
+                    if json_response["data"] is None:
                         json_response["error"] = True
                         json_response["error_msg"] = f"No data found for '{requested_data}' for Job ID {jid}"
 

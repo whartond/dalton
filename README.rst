@@ -590,10 +590,11 @@ For requests, ``<jobid>`` is the Job ID and::
 A JSON API request returns JSON with three root elements:
 
 -  | **data**
-   | The requested data.  If the 'all' key is requested, this contains key/value
-     pairs of all existing valid keys for the job.
-     This is null or an empty string
-     if there is no data for the requested jobid and key.
+   | The requested data.  If the key is invalid for the
+     job, then an error is returned, along with an error message stating
+     as such. If there is no data for the requested Job ID and key, then
+     this ``data`` parameter value is an empty string and ``error`` is set
+     to false..
 
 -  | **error**
    | [true\|false] depending if the API request generated an error. This is
