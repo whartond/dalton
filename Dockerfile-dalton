@@ -29,4 +29,4 @@ STOPSIGNAL SIGINT
 EXPOSE 8080
 
 # Note: if changing the next line, also look to change the command in docker-compose.yml
-CMD ["flask", "--app", "app", "run", "--port=8080", "--host=0.0.0.0"]
+CMD ["flask", "--app", "app", "run", "--port=8080", "--host=0.0.0.0", "--with-threads"]

@@ -784,11 +784,13 @@ def sensor_request_job():
     redis.set(f"{SENSOR_HASH}-tech", sensor_tech)
     redis.set(f"{SENSOR_HASH}-agent_version", AGENT_VERSION)
 
-    # grab a job! If it doesn't exist, return sleep.
-    response = redis.lpop(sensor_tech)
-    if response is None:
+    # grab a job! Block up to 30 seconds waiting for one (long polling).
+    # BLPOP returns (key, value) tuple or None on timeout.
+    result = redis.blpop(sensor_tech, timeout=30)
+    if result is None:
         return "sleep"
     else:
+        response = result[1]
         respobj = json.loads(response)
         new_jobid = respobj["id"]
         logger.info(

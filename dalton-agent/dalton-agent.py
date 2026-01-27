@@ -103,7 +103,7 @@ try:
     SENSOR_UID = config.get("dalton", "SENSOR_UID")
     DALTON_API = config.get("dalton", "DALTON_API")
     API_KEY = config.get("dalton", "API_KEY")
-    POLL_INTERVAL = int(config.get("dalton", "POLL_INTERVAL"))
+    RETRY_WAIT_INTERVAL = int(config.get("dalton", "RETRY_WAIT_INTERVAL"))
     KEEP_JOB_FILES = config.getboolean("dalton", "KEEP_JOB_FILES")
     USE_SURICATA_SOCKET_CONTROL_CONFIG_SETTING = config.getboolean(
         "dalton", "USE_SURICATA_SOCKET_CONTROL"
@@ -2032,7 +2032,7 @@ while True:
             logger.info("Job %s complete" % JOB_ID)
             JOB_ID = None
         else:
-            time.sleep(POLL_INTERVAL)
+            time.sleep(RETRY_WAIT_INTERVAL)
     except KeyboardInterrupt:
         logger.info("Keyboard Interrupt caught, exiting....")
         try:

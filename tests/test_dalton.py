@@ -63,7 +63,7 @@ class TestDalton(unittest.TestCase):
     def test_request_job(self, get_redis):
         """Try to request a job. It should not crash."""
         redis = mock.Mock()
-        redis.lpop.return_value = None
+        redis.blpop.return_value = None
         get_redis.return_value = redis
         versions = ["2.0.9", "3.0", "9.9.9"]
         for version in versions:
