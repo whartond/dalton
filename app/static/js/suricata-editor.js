@@ -31,6 +31,17 @@
   var latestLintResults = []; // CodeMirror lint addon delivers this synchronously
   var checkDebounceTimer = null;
   var checkInFlight = false;
+  // fetchKeywords() and runCheck() both fire from enableEditor() and both
+  // report through the same status line; without this, whichever request
+  // happens to resolve second wins the race and can stomp the other's
+  // text. runCheck() always starts first (it's called synchronously right
+  // after fetchKeywords() kicks off its fetch), so setting this before
+  // runCheck's own fetch goes out - not when it resolves - closes the race
+  // regardless of which response comes back first: fetchKeywords checks it
+  // right before every status update and steps aside once a check is
+  // underway, since the check status is the more current, more complete
+  // answer (it includes the engine version too).
+  var hasCheckResult = false;
 
   CodeMirror.defineSimpleMode("suricata", {
     start: [
@@ -97,7 +108,7 @@
         if (!data.available || !data.keywords) {
           // Fall back to whatever was already loaded (possibly nothing)
           // rather than showing an empty completion popup.
-          if (!keywordsByName) {
+          if (!keywordsByName && !hasCheckResult) {
             setStatus("");
           }
           return;
@@ -106,6 +117,9 @@
         data.keywords.forEach(function (kw) {
           keywordsByName[kw.name] = kw;
         });
+        if (hasCheckResult) {
+          return;
+        }
         var status = "keywords from Suricata " + data.engine_version;
         if (data.stale) {
           status += " (cached; linter unavailable)";
@@ -113,7 +127,7 @@
         setStatus(status);
       })
       .catch(function () {
-        if (!keywordsByName) {
+        if (!keywordsByName && !hasCheckResult) {
           setStatus("");
         }
       });
@@ -355,6 +369,10 @@
     if (!cm || checkInFlight) {
       return;
     }
+    // Set before anything async happens - see the comment on
+    // hasCheckResult's declaration for why this, not the fetch resolving,
+    // is what closes the race with fetchKeywords().
+    hasCheckResult = true;
     var rules = cm.getValue();
     if (!rules.trim()) {
       latestLintResults = [];
@@ -499,6 +517,7 @@
     clearResults();
     setStatus("");
     latestLintResults = [];
+    hasCheckResult = false;
     cm.toTextArea();
     cm = null;
   }
