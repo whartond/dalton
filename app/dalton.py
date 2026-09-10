@@ -38,13 +38,22 @@ import tarfile
 import tempfile
 import time
 import traceback
+import urllib.request
 import zipfile
 from distutils.version import LooseVersion
 from functools import lru_cache, wraps
 from logging.handlers import RotatingFileHandler
 from threading import Thread
 
-from flask import Blueprint, Response, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    Response,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from redis import Redis
 from ruamel import yaml
 
@@ -91,6 +100,20 @@ try:
     RULECAT_SCRIPT = dalton_config.get("dalton", "rulecat_script")
     MAX_PCAP_FILES = dalton_config.getint("dalton", "max_pcap_files")
     ENABLE_QUEUE_CLEARING = dalton_config.getboolean("dalton", "enable_queue_clearing")
+    # Suricata rule syntax checking (optional; the linter container is a
+    # convenience, not a dependency - the controller fails open if it's
+    # unreachable). Defaulted in code rather than to "" because dalton.conf
+    # is COPYd into the controller image at build time, not bind-mounted;
+    # an older image would otherwise silently report "not configured".
+    RULE_CHECK_URL = dalton_config.get(
+        "dalton", "rule_check_url", fallback="http://dalton_linter:8081/check"
+    )
+    RULE_CHECK_TIMEOUT = dalton_config.getint(
+        "dalton", "rule_check_timeout", fallback=6
+    )
+    KEYWORDS_URL = dalton_config.get(
+        "dalton", "keywords_url", fallback="http://dalton_linter:8081/keywords"
+    )
     DEBUG = dalton_config.getboolean("dalton", "debug")
     AUTH_PREFIX = dalton_config.get("dalton", "auth_prefix")
     AUTH_MAX = dalton_config.getint("dalton", "auth_max")
@@ -723,6 +746,57 @@ def get_engine_conf_file(sensor):
         if DEBUG:
             engine_config += f"  Error: {e}\r\n{traceback.format_exc()}"
         return engine_config
+
+
+def _linter_fail_open_get(url, timeout):
+    """GET a linter URL and return the parsed JSON object, or None on any
+    failure. This backs an optional convenience (rule syntax checking /
+    keyword completion); a broken or unreachable linter must never cost the
+    page anything beyond that feature, so every failure mode - missing
+    config, connection refused, timeout, non-200, unparseable body, and
+    valid-JSON-but-not-an-object - is treated identically as "unavailable".
+    """
+    if not url:
+        return None
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            if resp.status != 200:
+                return None
+            body = json.loads(resp.read())
+    except Exception:
+        return None
+    if not isinstance(body, dict):
+        return None
+    return body
+
+
+_keywords_cache = None
+
+
+@dalton_blueprint.route("/dalton/controller_api/rule_keywords", methods=["GET"])
+@check_user
+def api_get_rule_keywords():
+    """Proxy to the linter's /keywords endpoint (Suricata keyword completion
+    data and hover docs), cached in-process. Fails open: any problem
+    reaching the linter falls back to the last successfully cached response
+    (marked stale) so a linter outage degrades completion to stale, not
+    absent; only a never-yet-successful linter reports unavailable. The
+    payload only changes when the linter container is rebuilt, so a simple
+    module-level cache is enough for the single-process dev server this
+    controller runs on."""
+    global _keywords_cache
+    body = _linter_fail_open_get(KEYWORDS_URL, RULE_CHECK_TIMEOUT)
+    if body is not None:
+        _keywords_cache = body
+        body["available"] = True
+        body["stale"] = False
+        return jsonify(body)
+    if _keywords_cache is not None:
+        stale = dict(_keywords_cache)
+        stale["available"] = True
+        stale["stale"] = True
+        return jsonify(stale)
+    return jsonify({"available": False})
 
 
 @dalton_blueprint.route("/dalton/sensor_api/update/", methods=["POST"])

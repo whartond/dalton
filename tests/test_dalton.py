@@ -262,3 +262,98 @@ class TestDalton(unittest.TestCase):
         # Test with negative number (should use default)
         res = self.client.get("/dalton/controller_api/get-queue-json?num_jobs=-5")
         self.assertEqual(res.status_code, 200)
+
+
+@pytest.mark.usefixtures("client")
+class TestRuleKeywordsProxy(unittest.TestCase):
+    """Test the /dalton/controller_api/rule_keywords fail-open proxy to the
+    linter's /keywords endpoint. auth_prefix is "disabled" by default in
+    tests (as in the shipped dalton.conf), so check_user passes through
+    without any auth mocking needed."""
+
+    def setUp(self):
+        import app.dalton as dalton_module
+
+        self.dalton_module = dalton_module
+        # the in-process cache is module-level state; don't leak it between tests
+        self.dalton_module._keywords_cache = None
+
+    def tearDown(self):
+        self.dalton_module._keywords_cache = None
+
+    def _mock_response(self, status=200, body=b'{"keywords": ["sid"]}'):
+        resp = mock.MagicMock()
+        resp.__enter__.return_value = resp
+        resp.status = status
+        resp.read.return_value = body
+        return resp
+
+    @mock.patch("app.dalton.urllib.request.urlopen")
+    def test_success(self, urlopen):
+        urlopen.return_value = self._mock_response()
+        res = self.client.get("/dalton/controller_api/rule_keywords")
+        self.assertEqual(res.status_code, 200)
+        data = json.loads(res.data)
+        self.assertTrue(data["available"])
+        self.assertFalse(data["stale"])
+        self.assertEqual(data["keywords"], ["sid"])
+
+    @mock.patch("app.dalton.urllib.request.urlopen")
+    def test_connection_refused(self, urlopen):
+        urlopen.side_effect = ConnectionRefusedError()
+        res = self.client.get("/dalton/controller_api/rule_keywords")
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(json.loads(res.data)["available"])
+
+    @mock.patch("app.dalton.urllib.request.urlopen")
+    def test_timeout(self, urlopen):
+        urlopen.side_effect = TimeoutError()
+        res = self.client.get("/dalton/controller_api/rule_keywords")
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(json.loads(res.data)["available"])
+
+    @mock.patch("app.dalton.urllib.request.urlopen")
+    def test_non_200(self, urlopen):
+        urlopen.return_value = self._mock_response(status=500)
+        res = self.client.get("/dalton/controller_api/rule_keywords")
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(json.loads(res.data)["available"])
+
+    @mock.patch("app.dalton.urllib.request.urlopen")
+    def test_unparseable_body(self, urlopen):
+        urlopen.return_value = self._mock_response(body=b"not json")
+        res = self.client.get("/dalton/controller_api/rule_keywords")
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(json.loads(res.data)["available"])
+
+    @mock.patch("app.dalton.urllib.request.urlopen")
+    def test_valid_json_non_object(self, urlopen):
+        """json.loads succeeds on '["nope"]'; a naive .get() on that would raise."""
+        urlopen.return_value = self._mock_response(body=b'["nope"]')
+        res = self.client.get("/dalton/controller_api/rule_keywords")
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(json.loads(res.data)["available"])
+
+    def test_unconfigured_url(self):
+        self.dalton_module.KEYWORDS_URL = ""
+        try:
+            res = self.client.get("/dalton/controller_api/rule_keywords")
+            self.assertEqual(res.status_code, 200)
+            self.assertFalse(json.loads(res.data)["available"])
+        finally:
+            self.dalton_module.KEYWORDS_URL = "http://dalton_linter:8081/keywords"
+
+    @mock.patch("app.dalton.urllib.request.urlopen")
+    def test_outage_degrades_to_stale_not_absent(self, urlopen):
+        """A linter outage after a prior success should serve the cached
+        response marked stale, not report unavailable."""
+        urlopen.return_value = self._mock_response()
+        res = self.client.get("/dalton/controller_api/rule_keywords")
+        self.assertTrue(json.loads(res.data)["available"])
+
+        urlopen.side_effect = ConnectionRefusedError()
+        res = self.client.get("/dalton/controller_api/rule_keywords")
+        data = json.loads(res.data)
+        self.assertTrue(data["available"])
+        self.assertTrue(data["stale"])
+        self.assertEqual(data["keywords"], ["sid"])
