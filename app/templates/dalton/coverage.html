@@ -1,4 +1,12 @@
 {% extends "dalton/layout.html" %}
+{% block head %}
+{% if sensor_tech.startswith('suri') %}
+    <link href="{{ url_for('static', filename='codemirror/lib/codemirror.css') }}" rel="stylesheet" type="text/css">
+    <script src="{{ url_for('static', filename='codemirror/lib/codemirror.js') }}"></script>
+    <script src="{{ url_for('static', filename='codemirror/addon/mode/simple.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/suricata-editor.js') }}"></script>
+{% endif %}
+{% endblock %}
 {% block js %}
     $(window).on('beforeunload', function(){
         $('#uploadDialog').modal('hide');
@@ -67,6 +75,9 @@
     });
 
 	$(document).ready(function() {
+		if (window.SuricataEditor) {
+			window.SuricataEditor.init();
+		}
 		$('#prod_ruleset').show();
 		if ($('#optionRuleset').prop('checked')) {
 			$('#prod_ruleset').show();
@@ -79,6 +90,9 @@
 		}
 		if ($('#optionRulesetCustom').prop('checked')) {
 			$('#custom_ruleset').show();
+			if (window.SuricataEditor) {
+				window.SuricataEditor.refresh();
+			}
 		} else {
 			$('#custom_ruleset').hide();
 		}
@@ -121,9 +135,12 @@
 		$('#optionRulesetCustom').click( function() {
 			if ($('#optionRulesetCustom').prop('checked')) {
 				$('#custom_ruleset').show();
+				if (window.SuricataEditor) {
+					window.SuricataEditor.refresh();
+				}
 			} else {
 				$('#custom_ruleset').hide();
-			}        
+			}
 		});
 
         $("#overlay").change(function() {
@@ -470,6 +487,13 @@
 								Use custom rules
 							</label>
 							<span id="custom_ruleset">
+								{% if sensor_tech.startswith('suri') %}
+								<label class="checkbox">
+									<input type="checkbox" id="optionRuleEditor">
+									Rule editor <small>(syntax highlighting; the plain box below stays available)</small>
+									<small id="ruleEditorStatus"></small>
+								</label>
+								{% endif %}
 								<textarea rows='10' class='span'; style='margin-left:0;' name="custom_ruleset" placeholder='alert tcp any any -> any any (msg:"";);'>{% if manifest and manifest['custom-rules'] and custom_rules %}{{custom_rules}}{% endif %}</textarea>
 							</span>
 							{% endif %}
