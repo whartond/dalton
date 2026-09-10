@@ -283,6 +283,23 @@
     return severity === 1 ? "error" : "warning";
   }
 
+  // Suricata can emit the same note more than once for one rule: engine
+  // analysis runs a fast-pattern pass and a rule pass, and both append to the
+  // same record, so e.g. the 'fast_pattern:only' note arrives twice. Nothing is
+  // gained by showing it twice.
+  function dedupe(diags) {
+    var seen = {};
+    return diags.filter(function (d) {
+      var line = d.range && d.range.start ? d.range.start.line : 0;
+      var key = line + "\u0000" + d.severity + "\u0000" + d.message;
+      if (seen[key]) {
+        return false;
+      }
+      seen[key] = true;
+      return true;
+    });
+  }
+
   // Line order keeps the list aligned with the editor above it; severity breaks
   // ties so an error leads the warning on the same line rather than whichever
   // the engine happened to emit first.
@@ -449,9 +466,11 @@
           return;
         }
         var diags = sortDiagnostics(
-          (data.diagnostics || []).filter(function (d) {
-            return !FILTERED_MESSAGE_PATTERN.test(d.message);
-          })
+          dedupe(
+            (data.diagnostics || []).filter(function (d) {
+              return !FILTERED_MESSAGE_PATTERN.test(d.message);
+            })
+          )
         );
         latestLintResults = diags.map(diagnosticToLintError);
         renderResults(diags);
