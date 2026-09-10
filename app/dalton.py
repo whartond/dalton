@@ -770,6 +770,28 @@ def _linter_fail_open_get(url, timeout):
     return body
 
 
+def _linter_fail_open_post(url, timeout, payload):
+    """POST a JSON payload to a linter URL and return the parsed JSON
+    object, or None on any failure. Same fail-open contract as
+    _linter_fail_open_get."""
+    if not url:
+        return None
+    try:
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=data, headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status != 200:
+                return None
+            body = json.loads(resp.read())
+    except Exception:
+        return None
+    if not isinstance(body, dict):
+        return None
+    return body
+
+
 _keywords_cache = None
 
 
@@ -797,6 +819,29 @@ def api_get_rule_keywords():
         stale["stale"] = True
         return jsonify(stale)
     return jsonify({"available": False})
+
+
+@dalton_blueprint.route("/dalton/controller_api/check_rules", methods=["POST"])
+@check_user
+def api_check_rules():
+    """Proxy to the linter's /check endpoint (Suricata rule syntax
+    checking). Fails open: any problem reaching the linter, or no linter
+    configured, reports {"available": false} rather than an HTTP error -
+    this backs an optional convenience and must never cost the page
+    anything beyond its own diagnostics. Job submission never goes near
+    this endpoint."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
+    payload = {
+        "rules": data.get("rules") or "",
+        "engine_analysis": bool(data.get("engine_analysis", False)),
+    }
+    body = _linter_fail_open_post(RULE_CHECK_URL, RULE_CHECK_TIMEOUT, payload)
+    if body is None:
+        return jsonify({"available": False})
+    body["available"] = True
+    return jsonify(body)
 
 
 @dalton_blueprint.route("/dalton/sensor_api/update/", methods=["POST"])

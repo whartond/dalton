@@ -3,9 +3,11 @@
 {% if sensor_tech.startswith('suri') %}
     <link href="{{ url_for('static', filename='codemirror/lib/codemirror.css') }}" rel="stylesheet" type="text/css">
     <link href="{{ url_for('static', filename='codemirror/addon/hint/show-hint.css') }}" rel="stylesheet" type="text/css">
+    <link href="{{ url_for('static', filename='codemirror/addon/lint/lint.css') }}" rel="stylesheet" type="text/css">
     <script src="{{ url_for('static', filename='codemirror/lib/codemirror.js') }}"></script>
     <script src="{{ url_for('static', filename='codemirror/addon/mode/simple.js') }}"></script>
     <script src="{{ url_for('static', filename='codemirror/addon/hint/show-hint.js') }}"></script>
+    <script src="{{ url_for('static', filename='codemirror/addon/lint/lint.js') }}"></script>
     <script src="{{ url_for('static', filename='js/suricata-editor.js') }}"></script>
 {% endif %}
 {% endblock %}
@@ -492,8 +494,12 @@
 								{% if sensor_tech.startswith('suri') %}
 								<label class="checkbox">
 									<input type="checkbox" id="optionRuleEditor">
-									Rule editor <small>(syntax highlighting; the plain box below stays available)</small>
+									Rule editor <small>(syntax highlighting and checking; the plain box below stays available)</small>
 									<small id="ruleEditorStatus"></small>
+								</label>
+								<label class="checkbox" id="optionEngineAnalysisLabel" style="display:none;margin-left:20px;">
+									<input type="checkbox" id="optionEngineAnalysis">
+									Engine analysis <small>(extra performance/coverage guidance from Suricata)</small>
 								</label>
 								{% endif %}
 								<textarea rows='10' class='span'; style='margin-left:0;' name="custom_ruleset" placeholder='alert tcp any any -> any any (msg:"";);'>{% if manifest and manifest['custom-rules'] and custom_rules %}{{custom_rules}}{% endif %}</textarea>

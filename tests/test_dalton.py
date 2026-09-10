@@ -357,3 +357,105 @@ class TestRuleKeywordsProxy(unittest.TestCase):
         self.assertTrue(data["available"])
         self.assertTrue(data["stale"])
         self.assertEqual(data["keywords"], ["sid"])
+
+
+@pytest.mark.usefixtures("client")
+class TestCheckRulesProxy(unittest.TestCase):
+    """Test the /dalton/controller_api/check_rules fail-open proxy to the
+    linter's /check endpoint."""
+
+    def _mock_response(self, status=200, body=b'{"diagnostics": []}'):
+        resp = mock.MagicMock()
+        resp.__enter__.return_value = resp
+        resp.status = status
+        resp.read.return_value = body
+        return resp
+
+    @mock.patch("app.dalton.urllib.request.urlopen")
+    def test_success(self, urlopen):
+        urlopen.return_value = self._mock_response()
+        res = self.client.post(
+            "/dalton/controller_api/check_rules",
+            data=json.dumps({"rules": "alert tcp any any -> any any (sid:1;)"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        data = json.loads(res.data)
+        self.assertTrue(data["available"])
+        self.assertEqual(data["diagnostics"], [])
+
+    @mock.patch("app.dalton.urllib.request.urlopen")
+    def test_connection_refused(self, urlopen):
+        urlopen.side_effect = ConnectionRefusedError()
+        res = self.client.post(
+            "/dalton/controller_api/check_rules",
+            data=json.dumps({"rules": "alert"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(json.loads(res.data)["available"])
+
+    @mock.patch("app.dalton.urllib.request.urlopen")
+    def test_timeout(self, urlopen):
+        urlopen.side_effect = TimeoutError()
+        res = self.client.post(
+            "/dalton/controller_api/check_rules",
+            data=json.dumps({"rules": "alert"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(json.loads(res.data)["available"])
+
+    @mock.patch("app.dalton.urllib.request.urlopen")
+    def test_non_200(self, urlopen):
+        urlopen.return_value = self._mock_response(status=500)
+        res = self.client.post(
+            "/dalton/controller_api/check_rules",
+            data=json.dumps({"rules": "alert"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(json.loads(res.data)["available"])
+
+    @mock.patch("app.dalton.urllib.request.urlopen")
+    def test_unparseable_body(self, urlopen):
+        urlopen.return_value = self._mock_response(body=b"not json")
+        res = self.client.post(
+            "/dalton/controller_api/check_rules",
+            data=json.dumps({"rules": "alert"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(json.loads(res.data)["available"])
+
+    @mock.patch("app.dalton.urllib.request.urlopen")
+    def test_valid_json_non_object(self, urlopen):
+        urlopen.return_value = self._mock_response(body=b'["nope"]')
+        res = self.client.post(
+            "/dalton/controller_api/check_rules",
+            data=json.dumps({"rules": "alert"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(json.loads(res.data)["available"])
+
+    def test_unconfigured_url(self):
+        import app.dalton as dalton_module
+
+        dalton_module.RULE_CHECK_URL = ""
+        try:
+            res = self.client.post(
+                "/dalton/controller_api/check_rules",
+                data=json.dumps({"rules": "alert"}),
+                content_type="application/json",
+            )
+            self.assertEqual(res.status_code, 200)
+            self.assertFalse(json.loads(res.data)["available"])
+        finally:
+            dalton_module.RULE_CHECK_URL = "http://dalton_linter:8081/check"
+
+    def test_no_body_does_not_raise(self):
+        """POSTing with no/invalid JSON body must not 500 - it should be
+        treated the same as an empty ruleset."""
+        res = self.client.post("/dalton/controller_api/check_rules")
+        self.assertEqual(res.status_code, 200)

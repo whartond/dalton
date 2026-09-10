@@ -69,7 +69,7 @@ COPY linter/requirements.txt /opt/linter/requirements.txt
 RUN python3 -m venv /opt/linter/venv && \
     /opt/linter/venv/bin/pip install --no-cache-dir -r /opt/linter/requirements.txt
 
-COPY linter/app.py linter/legacy_keywords.py /opt/linter/
+COPY linter/app.py linter/legacy_keywords.py linter/guard.py /opt/linter/
 RUN chown -R 1500:1500 /opt/linter
 
 USER 1500:1500

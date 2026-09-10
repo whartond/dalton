@@ -1,10 +1,14 @@
 import csv
 import io
+import os
 import re
 import subprocess
+import tempfile
 
-from flask import Flask, jsonify
+import guard
+from flask import Flask, jsonify, request
 from legacy_keywords import LEGACY_KEYWORD_ALIASES
+from suricatals.langserver import LangServer
 
 SURICATA_BINARY = "suricata"
 
@@ -64,7 +68,34 @@ def _get_keywords():
 ENGINE_VERSION = _get_engine_version()
 KEYWORDS = _get_keywords()
 
+# Constructed once per gunicorn worker at import time; this runs
+# `suricata -V` once, not per-request - benchmark the service, not the
+# `suricata-language-server --batch-file` CLI, which pays that cost (plus
+# re-importing pygls and the Docker SDK) on every single invocation.
+_lang_server = LangServer(
+    settings={
+        "suricata_binary": SURICATA_BINARY,
+        "max_lines": 500,
+        "docker_mode": False,
+    },
+    batch_mode=True,
+)
+
 app = Flask(__name__)
+
+
+def _guard_rejection_diagnostic(rejection):
+    return {
+        "range": {
+            "start": {"line": rejection.line, "character": 0},
+            "end": {"line": rejection.line, "character": 1},
+        },
+        "message": rejection.message,
+        "source": "Dalton Rule Guard",
+        "severity": 1,  # LSP Error
+        "content": "",
+        "sid": 0,
+    }
 
 
 @app.route("/health", methods=["GET"])
@@ -75,3 +106,36 @@ def health():
 @app.route("/keywords", methods=["GET"])
 def keywords():
     return jsonify({"engine_version": ENGINE_VERSION, "keywords": KEYWORDS})
+
+
+@app.route("/check", methods=["POST"])
+def check():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
+    rules = data.get("rules") or ""
+    engine_analysis = bool(data.get("engine_analysis", False))
+
+    try:
+        guard.check_rule_buffer(rules)
+    except guard.GuardRejection as rejection:
+        return jsonify(
+            {
+                "engine_version": ENGINE_VERSION,
+                "diagnostics": [_guard_rejection_diagnostic(rejection)],
+            }
+        )
+
+    # An empty, isolated working directory: any relative path a rule names
+    # (e.g. a lua: target the guard didn't already reject) resolves to
+    # nothing, rather than something real on the container's filesystem.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        rule_path = os.path.join(tmpdir, "dalton.rules")
+        with open(rule_path, "w", encoding="utf-8") as f:
+            f.write(rules)
+        _, _, diags = _lang_server.analyse_file(
+            rule_path, engine_analysis=engine_analysis
+        )
+
+    messages = [m for m in (d.to_message() for d in diags) if m is not None]
+    return jsonify({"engine_version": ENGINE_VERSION, "diagnostics": messages})
