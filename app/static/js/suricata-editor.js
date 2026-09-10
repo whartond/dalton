@@ -42,6 +42,14 @@
   // underway, since the check status is the more current, more complete
   // answer (it includes the engine version too).
   var hasCheckResult = false;
+  // Bumped whenever the editor is torn down. A check already in flight then
+  // lands on a page that has moved on: disableEditor() has cleared the panel,
+  // so an unguarded response would refill it and those findings would still be
+  // there next time the editor was switched on, describing text that may have
+  // changed since. A token rather than a null check on cm, because a disable
+  // followed by an enable inside one request's lifetime leaves an editor that
+  // exists but is not the one that asked.
+  var checkGeneration = 0;
 
   CodeMirror.defineSimpleMode("suricata", {
     start: [
@@ -388,9 +396,18 @@
       : false;
 
     checkInFlight = true;
+    var generation = checkGeneration;
     setStatus("Checking\u2026", "suri-check-busy");
 
+    // The editor this check was started for is gone or has been replaced.
+    function superseded() {
+      return generation !== checkGeneration || !cm;
+    }
+
     function unavailable() {
+      if (superseded()) {
+        return;
+      }
       latestLintResults = [];
       clearResults();
       setStatus("Syntax checking is unavailable right now.", "suri-check-unavailable");
@@ -408,6 +425,9 @@
         return resp.json();
       })
       .then(function (data) {
+        if (superseded()) {
+          return;
+        }
         if (!data || !data.available) {
           unavailable();
           return;
@@ -430,6 +450,8 @@
       })
       .catch(unavailable)
       .then(function () {
+        // Unconditional: a superseded response still has to release the guard,
+        // or the next check never runs.
         checkInFlight = false;
       });
   }
@@ -518,6 +540,7 @@
     setStatus("");
     latestLintResults = [];
     hasCheckResult = false;
+    checkGeneration += 1;
     cm.toTextArea();
     cm = null;
   }
