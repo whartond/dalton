@@ -10,7 +10,16 @@
   var ENGINE_ANALYSIS_STORAGE_KEY = "dalton_suricata_engine_analysis_enabled";
   var KEYWORDS_URL = "/dalton/controller_api/rule_keywords";
   var CHECK_URL = "/dalton/controller_api/check_rules";
-  var CHECK_DEBOUNCE_MS = 500;
+  // A check costs about 0.15s on the linter and the in-flight guard below caps
+  // each browser at one outstanding request, so this can be short without
+  // putting a room full of people through a request per keystroke.
+  var CHECK_DEBOUNCE_MS = 1500;
+  var SEVERITY = {
+    1: { cm: "error", label: "error", cls: "suri-diag-error" },
+    2: { cm: "warning", label: "warning", cls: "suri-diag-warning" },
+    3: { cm: "info", label: "info", cls: "suri-diag-info" },
+    4: { cm: "hint", label: "hint", cls: "suri-diag-hint" },
+  };
   // Emitted once per rule by engine analysis; a classification, not
   // something to act on, and at one line per rule it buries everything
   // else. Filtered on the client so the linter stays a faithful proxy for
@@ -21,6 +30,7 @@
   var hoverTooltip = null;
   var latestLintResults = []; // CodeMirror lint addon delivers this synchronously
   var checkDebounceTimer = null;
+  var checkInFlight = false;
 
   CodeMirror.defineSimpleMode("suricata", {
     start: [
@@ -70,10 +80,11 @@
     }
   }
 
-  function setStatus(text) {
+  function setStatus(text, className) {
     var status = document.getElementById("ruleEditorStatus");
     if (status) {
-      status.textContent = text;
+      status.className = className || "";
+      status.textContent = text || "";
     }
   }
 
@@ -234,6 +245,98 @@
     return severity === 1 ? "error" : "warning";
   }
 
+  // Line order keeps the list aligned with the editor above it; severity breaks
+  // ties so an error leads the warning on the same line rather than whichever
+  // the engine happened to emit first.
+  function sortDiagnostics(diags) {
+    return diags.slice().sort(function (a, b) {
+      var la = a.range && a.range.start ? a.range.start.line : 0;
+      var lb = b.range && b.range.start ? b.range.start.line : 0;
+      if (la !== lb) {
+        return la - lb;
+      }
+      return (a.severity || 2) - (b.severity || 2);
+    });
+  }
+
+  function summarise(diags) {
+    if (!diags.length) {
+      return "No problems found.";
+    }
+    var counts = { 1: 0, 2: 0, 3: 0, 4: 0 };
+    diags.forEach(function (d) {
+      counts[SEVERITY[d.severity] ? d.severity : 2] += 1;
+    });
+    var parts = [];
+    if (counts[1]) {
+      parts.push(counts[1] + (counts[1] === 1 ? " error" : " errors"));
+    }
+    if (counts[2]) {
+      parts.push(counts[2] + (counts[2] === 1 ? " warning" : " warnings"));
+    }
+    var notes = counts[3] + counts[4];
+    if (notes) {
+      parts.push(notes + (notes === 1 ? " note" : " notes"));
+    }
+    return parts.join(", ") + ".";
+  }
+
+  function clearResults() {
+    var panel = document.getElementById("ruleEditorResults");
+    if (panel) {
+      panel.innerHTML = "";
+    }
+  }
+
+  // The gutter markers alone can only show one problem at a time, need to be
+  // discovered by hovering, and say nothing on touch. The list gives the whole
+  // picture at once and somewhere to click through to a line.
+  function renderResults(diags) {
+    var panel = document.getElementById("ruleEditorResults");
+    if (!panel) {
+      return;
+    }
+    panel.innerHTML = "";
+    if (!diags.length) {
+      return;
+    }
+    var list = document.createElement("ul");
+    list.className = "suri-diag-list";
+    diags.forEach(function (diag) {
+      var severity = SEVERITY[diag.severity] || SEVERITY[2];
+      var line = (diag.range && diag.range.start ? diag.range.start.line : 0) + 1;
+
+      var item = document.createElement("li");
+      item.className = severity.cls;
+
+      var sev = document.createElement("span");
+      sev.className = "suri-diag-sev";
+      sev.textContent = severity.label;
+      item.appendChild(sev);
+
+      var jump = document.createElement("a");
+      jump.className = "suri-diag-line";
+      jump.href = "#";
+      jump.textContent = "line " + line;
+      jump.addEventListener("click", function (event) {
+        event.preventDefault();
+        if (cm) {
+          cm.setCursor({ line: line - 1, ch: 0 });
+          cm.focus();
+        }
+      });
+      item.appendChild(jump);
+
+      var message = document.createElement("span");
+      message.className = "suri-diag-msg";
+      message.textContent = diag.message;
+      item.appendChild(message);
+
+      list.appendChild(item);
+    });
+    panel.appendChild(list);
+  }
+
   function diagnosticToLintError(diag) {
     return {
       from: CodeMirror.Pos(diag.range.start.line, diag.range.start.character),
@@ -243,51 +346,73 @@
     };
   }
 
+  // Fails open in every direction: a checker that is down, slow or confused
+  // leaves the editor fully usable and never blocks submission. It must say so
+  // rather than just clearing, though -- silently showing nothing is
+  // indistinguishable from "your rules are clean", which is the one conclusion
+  // a broken checker must not let anyone draw.
   function runCheck() {
-    if (!cm) {
+    if (!cm || checkInFlight) {
       return;
     }
+    var rules = cm.getValue();
+    if (!rules.trim()) {
+      latestLintResults = [];
+      clearResults();
+      setStatus("");
+      cm.performLint();
+      return;
+    }
+
     var engineAnalysisCheckbox = document.getElementById("optionEngineAnalysis");
     var engineAnalysis = engineAnalysisCheckbox
       ? engineAnalysisCheckbox.checked
       : false;
-    var body = JSON.stringify({
-      rules: cm.getValue(),
-      engine_analysis: engineAnalysis,
-    });
+
+    checkInFlight = true;
+    setStatus("Checking\u2026", "suri-check-busy");
+
+    function unavailable() {
+      latestLintResults = [];
+      clearResults();
+      setStatus("Syntax checking is unavailable right now.", "suri-check-unavailable");
+      if (cm) {
+        cm.performLint();
+      }
+    }
+
     fetch(CHECK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: body,
+      body: JSON.stringify({ rules: rules, engine_analysis: engineAnalysis }),
     })
       .then(function (resp) {
         return resp.json();
       })
       .then(function (data) {
-        if (!data.available) {
-          latestLintResults = [];
-          if (cm) {
-            cm.performLint();
-          }
+        if (!data || !data.available) {
+          unavailable();
           return;
         }
-        latestLintResults = (data.diagnostics || [])
-          .filter(function (d) {
+        var diags = sortDiagnostics(
+          (data.diagnostics || []).filter(function (d) {
             return !FILTERED_MESSAGE_PATTERN.test(d.message);
           })
-          .map(diagnosticToLintError);
-        if (data.engine_version) {
-          setStatus("checked against Suricata " + data.engine_version);
-        }
+        );
+        latestLintResults = diags.map(diagnosticToLintError);
+        renderResults(diags);
+        setStatus(
+          summarise(diags) +
+            (data.engine_version ? " (Suricata " + data.engine_version + ")" : ""),
+          diags.length ? "suri-check-found" : "suri-check-clean"
+        );
         if (cm) {
           cm.performLint();
         }
       })
-      .catch(function () {
-        latestLintResults = [];
-        if (cm) {
-          cm.performLint();
-        }
+      .catch(unavailable)
+      .then(function () {
+        checkInFlight = false;
       });
   }
 
@@ -312,10 +437,12 @@
     updateLinting(latestLintResults);
   }
 
-  function updateEngineAnalysisVisibility(visible) {
-    var label = document.getElementById("optionEngineAnalysisLabel");
-    if (label) {
-      label.style.display = visible ? "" : "none";
+  // The check button, engine-analysis toggle, status and results only mean
+  // anything while the editor is up.
+  function updateControlsVisibility(visible) {
+    var controls = document.getElementById("ruleEditorControls");
+    if (controls) {
+      controls.style.display = visible ? "" : "none";
     }
   }
 
@@ -355,7 +482,7 @@
     if (engineAnalysisCheckbox) {
       engineAnalysisCheckbox.checked = readEngineAnalysisPreference();
     }
-    updateEngineAnalysisVisibility(true);
+    updateControlsVisibility(true);
     runCheck();
   }
 
@@ -367,8 +494,11 @@
       clearTimeout(checkDebounceTimer);
       checkDebounceTimer = null;
     }
-    updateEngineAnalysisVisibility(false);
+    updateControlsVisibility(false);
     hideHoverTooltip();
+    clearResults();
+    setStatus("");
+    latestLintResults = [];
     cm.toTextArea();
     cm = null;
   }
@@ -400,6 +530,8 @@
 
     var enabled = readStoredPreference();
     checkbox.checked = enabled;
+    // The template also hides these, but don't depend on that staying true.
+    updateControlsVisibility(enabled);
     if (enabled) {
       enableEditor();
     }
@@ -407,6 +539,18 @@
     checkbox.addEventListener("change", function () {
       setEnabled(checkbox.checked);
     });
+
+    var checkNow = document.getElementById("ruleEditorCheckNow");
+    if (checkNow) {
+      checkNow.addEventListener("click", function (event) {
+        event.preventDefault();
+        if (checkDebounceTimer) {
+          clearTimeout(checkDebounceTimer);
+          checkDebounceTimer = null;
+        }
+        runCheck();
+      });
+    }
 
     var engineAnalysisCheckbox = document.getElementById("optionEngineAnalysis");
     if (engineAnalysisCheckbox) {

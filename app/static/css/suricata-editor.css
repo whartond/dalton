@@ -1,0 +1,93 @@
+/* suricata-editor.css — the optional rule editor on the coverage page.
+ * Loaded only by that page, alongside the CodeMirror assets. */
+
+.CodeMirror {
+    height: auto;
+    min-height: 170px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.CodeMirror-scroll {
+    min-height: 170px;
+}
+
+.CodeMirror-hints {
+    font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+    font-size: 12px;
+    max-height: 22em;
+    z-index: 1100;  /* above Bootstrap 2's modals-and-dropdowns range */
+}
+
+/* ------------------------------------------------------------- controls */
+
+#ruleEditorControls {
+    margin-top: 6px;
+}
+
+#optionEngineAnalysisLabel {
+    margin-left: 12px;
+    font-size: 12px;
+    color: #555;
+}
+
+#ruleEditorStatus {
+    margin-left: 10px;
+    font-size: 12px;
+}
+
+.suri-check-busy        { color: #888; }
+.suri-check-clean       { color: #468847; }
+.suri-check-found       { color: #333; }
+.suri-check-unavailable { color: #999; font-style: italic; }
+
+/* ---------------------------------------------------------- diagnostics */
+
+.suri-diag-list {
+    list-style: none;
+    margin: 8px 0 0 0;
+    padding: 0;
+    font-size: 12px;
+    /* A hundred rules with engine analysis on would otherwise push the submit
+       button off the bottom of the page. */
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+.suri-diag-list li {
+    padding: 3px 6px;
+    border-left: 3px solid #ccc;
+    margin-bottom: 2px;
+    background: #f7f7f7;
+}
+
+.suri-diag-list li.suri-diag-error   { border-left-color: #b94a48; }
+.suri-diag-list li.suri-diag-warning { border-left-color: #c09853; }
+.suri-diag-list li.suri-diag-info    { border-left-color: #3a87ad; }
+.suri-diag-list li.suri-diag-hint    { border-left-color: #999; }
+
+.suri-diag-sev {
+    display: inline-block;
+    min-width: 60px;
+    font-weight: bold;
+    text-transform: uppercase;
+    font-size: 10px;
+}
+
+.suri-diag-error   .suri-diag-sev { color: #b94a48; }
+.suri-diag-warning .suri-diag-sev { color: #c09853; }
+.suri-diag-info    .suri-diag-sev { color: #3a87ad; }
+.suri-diag-hint    .suri-diag-sev { color: #999; }
+
+.suri-diag-line {
+    display: inline-block;
+    min-width: 60px;
+    font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+}
+
+.suri-diag-msg {
+    margin-left: 6px;
+}
