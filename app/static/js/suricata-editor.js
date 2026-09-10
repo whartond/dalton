@@ -160,16 +160,32 @@
     };
   }
 
+  // Rule options live between the header's parens. Completing outside them
+  // offers option keywords where only an action, protocol, address or port is
+  // legal, which fights the user on every line.
+  function inOptions(cm, cursor) {
+    var before = (cm.getLine(cursor.line) || "").slice(0, cursor.ch);
+    return before.lastIndexOf("(") > before.lastIndexOf(")");
+  }
+
   function suricataHint(cm) {
     if (!keywordsByName) {
       return null;
     }
     var cursor = cm.getCursor();
+    if (!inOptions(cm, cursor)) {
+      return null;
+    }
     var word = currentWordRange(cm, cursor);
     var prefix = word.text.toLowerCase();
+    // Without a prefix this would drop the entire keyword list -- several
+    // hundred entries -- into the popup, which is no help to anyone.
+    if (!prefix) {
+      return null;
+    }
     var matches = Object.keys(keywordsByName)
       .filter(function (name) {
-        return prefix.length === 0 || name.toLowerCase().indexOf(prefix) === 0;
+        return name.toLowerCase().indexOf(prefix) === 0;
       })
       .sort()
       .map(function (name) {
@@ -514,6 +530,24 @@
     });
     cm.getWrapperElement().addEventListener("mouseleave", hideHoverTooltip);
     cm.on("changes", scheduleCheck);
+    // Ctrl-Space alone is not a trigger anyone can rely on: on most Linux
+    // desktops it is bound to the input-method switcher and never reaches the
+    // browser, so completion looked simply broken. Offer it while typing, the
+    // way an editor is expected to behave. suricataHint returns null when
+    // there is nothing to say, so this is quiet when it should be.
+    cm.on("inputRead", function (editor, change) {
+      // change.text is an array of lines, so its length only rules out a
+      // multi-line paste. Checking the line's own length is what separates a
+      // typed character from a pasted rule -- otherwise pasting one drops a
+      // completion popup over it.
+      if (change.text.length !== 1 || change.text[0].length !== 1) {
+        return;
+      }
+      if (!/[\w.]/.test(change.text[0])) {
+        return;
+      }
+      editor.showHint();
+    });
     if (!keywordsByName) {
       fetchKeywords();
     }
