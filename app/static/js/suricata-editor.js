@@ -36,6 +36,8 @@
   // wrong moment left the panel showing results for the previous settings
   // until the next edit. Remember that one was wanted and run it on release.
   var checkPending = false;
+  var hoverTimer = null;
+  var HOVER_DELAY_MS = 350;
   // Nothing else bounds the browser -> controller leg, and the browser default
   // is minutes; a stall would pin checkInFlight and kill checking until reload.
   var REQUEST_TIMEOUT_MS = 8000;
@@ -208,6 +210,10 @@
   }
 
   function hideHoverTooltip() {
+    if (hoverTimer) {
+      clearTimeout(hoverTimer);
+      hoverTimer = null;
+    }
     if (hoverTooltip) {
       hoverTooltip.remove();
       hoverTooltip = null;
@@ -568,9 +574,27 @@
       },
     });
     cm.getWrapperElement().addEventListener("mousemove", function (event) {
-      onEditorMouseOver(cm, event);
+      // onEditorMouseOver re-tokenises the line and rebuilds the tooltip, so
+      // running it at pointer rate is a lot of work to do sixty times a second
+      // while the pointer simply rests on a keyword.
+      if (hoverTimer) {
+        clearTimeout(hoverTimer);
+      }
+      var x = event.clientX;
+      var y = event.clientY;
+      hoverTimer = setTimeout(function () {
+        onEditorMouseOver(cm, { clientX: x, clientY: y, target: null });
+      }, HOVER_DELAY_MS);
     });
-    cm.getWrapperElement().addEventListener("mouseleave", hideHoverTooltip);
+    cm.getWrapperElement().addEventListener("mouseleave", function (event) {
+      // The tooltip lives on document.body, not inside the wrapper, so
+      // moving the pointer onto it counts as leaving the editor. Without
+      // this the tooltip is torn down before its link can be clicked.
+      if (hoverTooltip && hoverTooltip.contains(event.relatedTarget)) {
+        return;
+      }
+      hideHoverTooltip();
+    });
     cm.on("changes", scheduleCheck);
     // Ctrl-Space alone is not a trigger anyone can rely on: on most Linux
     // desktops it is bound to the input-method switcher and never reaches the
@@ -680,16 +704,6 @@
         runCheck();
       });
     }
-
-    // CodeMirror only syncs back to the underlying textarea on toTextArea()
-    // (or an explicit save()) - without this, submitting the form while the
-    // editor is active would send whatever was in the textarea at
-    // construction time, not the edited content.
-    document.getElementById("submitjob").addEventListener("submit", function () {
-      if (cm) {
-        cm.save();
-      }
-    });
   }
 
   window.SuricataEditor = {

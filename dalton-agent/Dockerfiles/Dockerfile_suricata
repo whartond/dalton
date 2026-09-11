@@ -74,7 +74,13 @@ RUN chown -R 1500:1500 /opt/linter
 
 USER 1500:1500
 EXPOSE 8081
-CMD ["/opt/linter/venv/bin/gunicorn", "--workers=2", "--bind=0.0.0.0:8081", "app:app"]
+# Worker count is the concurrency cap -- each check forks a Suricata. The
+# timeout reaps a wedged run rather than letting it hold a worker long after
+# the controller (6s) gave up, and the backlog bounds the accept queue.
+CMD ["/opt/linter/venv/bin/gunicorn", \
+     "--workers=2", "--threads=1", \
+     "--timeout=15", "--graceful-timeout=5", "--backlog=16", \
+     "--bind=0.0.0.0:8081", "app:app"]
 
 
 ###########################
