@@ -1370,10 +1370,13 @@ against.
 
 Syntax checking uses the `Suricata Language Server
 <https://github.com/StamusNetworks/suricata-language-server>`__ (SLS),
-which is GPL-3.0-licensed. SLS runs only inside the ``linter`` container
-and is reached by the (Apache-2.0) controller as an arm's-length subprocess
-over HTTP -- it is not linked into or distributed as part of the Dalton
-codebase.
+which is GPL-3.0-licensed. SLS runs only inside the ``linter`` container,
+where it is invoked as a separate OS process via its own ``--batch-file``
+CLI (see ``dalton-agent/linter/app.py``) -- never imported into or linked
+with the linter's own (Apache-2.0) Flask app, so the two stay arm's-length
+programs communicating over an argv/stdout boundary. The (Apache-2.0)
+controller, in turn, never talks to SLS directly at all; it only ever
+reaches the ``linter`` container over HTTP.
 
 The feature is a convenience, not a dependency: if the ``linter`` container
 is unreachable, unhealthy, or disabled, the controller fails open and the

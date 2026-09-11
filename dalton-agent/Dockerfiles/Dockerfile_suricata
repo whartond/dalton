@@ -74,9 +74,16 @@ RUN chown -R 1500:1500 /opt/linter
 
 USER 1500:1500
 EXPOSE 8081
-# Worker count is the concurrency cap -- each check forks a Suricata. The
-# timeout reaps a wedged run rather than letting it hold a worker long after
-# the controller (6s) gave up, and the backlog bounds the accept queue.
+# Worker count is the concurrency cap -- each check now forks SLS's own
+# --batch-file CLI, which forks Suricata in turn. Measured in dev testing
+# (container capped at cpus: 1.0 in docker-compose.yml, regardless of host
+# core count): ~0.6-0.9s per check sequentially, regardless of rule count
+# (fixed interpreter/subprocess startup dominates, not analysis work); 4
+# concurrent checks queue behind the CPU limit and stretch to 2-4s each.
+# The timeout reaps a wedged run rather than letting it hold a worker long
+# after the controller (6s) gave up, and the backlog bounds the accept
+# queue. More workers would not raise throughput here without also raising
+# the CPU limit -- checks are CPU-bound, not I/O-bound.
 CMD ["/opt/linter/venv/bin/gunicorn", \
      "--workers=2", "--threads=1", \
      "--timeout=15", "--graceful-timeout=5", "--backlog=16", \

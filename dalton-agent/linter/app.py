@@ -1,16 +1,29 @@
 import csv
 import io
+import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 
 import guard
 from flask import Flask, jsonify, request
 from legacy_keywords import LEGACY_KEYWORD_ALIASES
-from suricatals.langserver import LangServer
 
 SURICATA_BINARY = "suricata"
+
+# SLS (suricata-language-server) is GPL-3.0; this file is Apache-2.0. It is
+# invoked here only as a separate OS process via its own --batch-file CLI,
+# never imported, so the two stay arm's-length programs talking over an
+# argv/stdout boundary rather than one combined/linked work. Its console
+# script lives next to this interpreter's own binary inside the venv (see
+# Dockerfile_suricata's `linter` stage).
+SLS_BINARY = os.path.join(
+    os.path.dirname(os.path.abspath(sys.executable)), "suricata-language-server"
+)
+SLS_MAX_LINES = "500"
+SLS_TIMEOUT = 10
 
 
 def _get_engine_version():
@@ -68,20 +81,37 @@ def _get_keywords():
 ENGINE_VERSION = _get_engine_version()
 KEYWORDS = _get_keywords()
 
-# Constructed once per gunicorn worker at import time; this runs
-# `suricata -V` once, not per-request - benchmark the service, not the
-# `suricata-language-server --batch-file` CLI, which pays that cost (plus
-# re-importing pygls and the Docker SDK) on every single invocation.
-_lang_server = LangServer(
-    settings={
-        "suricata_binary": SURICATA_BINARY,
-        "max_lines": 500,
-        "docker_mode": False,
-    },
-    batch_mode=True,
-)
-
 app = Flask(__name__)
+
+
+def _run_syntax_check(rule_path, engine_analysis):
+    """Run SLS's own batch-mode CLI as a subprocess and parse its
+    line-delimited JSON diagnostics (one `suricatals.to_message()` dict per
+    line, or the literal "null" for a diagnostic SLS didn't finish building -
+    dropped here rather than passed on to the caller)."""
+    cmd = [
+        SLS_BINARY,
+        "--batch-file",
+        rule_path,
+        "--suricata-binary",
+        SURICATA_BINARY,
+        "--max-lines",
+        SLS_MAX_LINES,
+    ]
+    if not engine_analysis:
+        cmd.append("--no-engine-analysis")
+    proc = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=SLS_TIMEOUT, check=False
+    )
+    diagnostics = []
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        message = json.loads(line)
+        if message is not None:
+            diagnostics.append(message)
+    return diagnostics
 
 
 def _guard_rejection_diagnostic(rejection):
@@ -136,9 +166,6 @@ def check():
         rule_path = os.path.join(tmpdir, "dalton.rules")
         with open(rule_path, "w", encoding="utf-8") as f:
             f.write(rules)
-        _, _, diags = _lang_server.analyse_file(
-            rule_path, engine_analysis=engine_analysis
-        )
+        messages = _run_syntax_check(rule_path, engine_analysis)
 
-    messages = [m for m in (d.to_message() for d in diags) if m is not None]
     return jsonify({"engine_version": ENGINE_VERSION, "diagnostics": messages})

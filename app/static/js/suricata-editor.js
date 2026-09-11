@@ -10,9 +10,14 @@
   var ENGINE_ANALYSIS_STORAGE_KEY = "dalton_suricata_engine_analysis_enabled";
   var KEYWORDS_URL = "/dalton/controller_api/rule_keywords";
   var CHECK_URL = "/dalton/controller_api/check_rules";
-  // A check costs about 0.15s on the linter and the in-flight guard below caps
-  // each browser at one outstanding request, so this can be short without
-  // putting a room full of people through a request per keystroke.
+  // Each check spawns a fresh suricata-language-server process on the linter
+  // (see dalton-agent/linter/app.py) rather than reusing an in-process
+  // instance, so it costs noticeably more than a bare HTTP round trip --
+  // ~0.6-0.9s measured in dev testing, regardless of rule count, since
+  // interpreter/subprocess startup dominates. The in-flight guard below
+  // also caps each browser at one outstanding request, so this can stay
+  // short without putting a room full of people through a request per
+  // keystroke.
   var CHECK_DEBOUNCE_MS = 1500;
   var SEVERITY = {
     1: { cm: "error", label: "error", cls: "suri-diag-error" },
