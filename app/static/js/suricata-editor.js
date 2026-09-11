@@ -31,6 +31,14 @@
   var latestLintResults = []; // CodeMirror lint addon delivers this synchronously
   var checkDebounceTimer = null;
   var checkInFlight = false;
+  // A check asked for while one is in flight used to be dropped with nothing
+  // to re-arm it, so toggling engine analysis or hitting the button at the
+  // wrong moment left the panel showing results for the previous settings
+  // until the next edit. Remember that one was wanted and run it on release.
+  var checkPending = false;
+  // Nothing else bounds the browser -> controller leg, and the browser default
+  // is minutes; a stall would pin checkInFlight and kill checking until reload.
+  var REQUEST_TIMEOUT_MS = 8000;
   // fetchKeywords() and runCheck() both fire from enableEditor() and both
   // report through the same status line; without this, whichever request
   // happens to resolve second wins the race and can stomp the other's
@@ -407,7 +415,11 @@
   // indistinguishable from "your rules are clean", which is the one conclusion
   // a broken checker must not let anyone draw.
   function runCheck() {
-    if (!cm || checkInFlight) {
+    if (!cm) {
+      return;
+    }
+    if (checkInFlight) {
+      checkPending = true;
       return;
     }
     // Set before anything async happens - see the comment on
@@ -449,10 +461,16 @@
       }
     }
 
+    var controller = new AbortController();
+    var timer = setTimeout(function () {
+      controller.abort();
+    }, REQUEST_TIMEOUT_MS);
+
     fetch(CHECK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rules: rules, engine_analysis: engineAnalysis }),
+      signal: controller.signal,
     })
       .then(function (resp) {
         return resp.json();
@@ -484,10 +502,15 @@
         }
       })
       .catch(unavailable)
-      .then(function () {
-        // Unconditional: a superseded response still has to release the guard,
-        // or the next check never runs.
+      // finally, not then: if unavailable() itself throws, a .then(onFulfilled)
+      // is skipped and the guard leaks, which kills checking for good.
+      .finally(function () {
+        clearTimeout(timer);
         checkInFlight = false;
+        if (checkPending) {
+          checkPending = false;
+          runCheck();
+        }
       });
   }
 
@@ -594,6 +617,7 @@
     latestLintResults = [];
     hasCheckResult = false;
     checkGeneration += 1;
+    checkPending = false;
     cm.toTextArea();
     cm = null;
   }

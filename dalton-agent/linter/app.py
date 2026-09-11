@@ -114,6 +114,9 @@ def check():
     if not isinstance(data, dict):
         data = {}
     rules = data.get("rules") or ""
+    if not isinstance(rules, str):
+        # Without this a JSON object or list reaches .strip() and 500s.
+        return jsonify({"error": "'rules' must be a string"}), 400
     engine_analysis = bool(data.get("engine_analysis", False))
 
     try:

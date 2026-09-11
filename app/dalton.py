@@ -821,6 +821,30 @@ def api_get_rule_keywords():
     return jsonify({"available": False})
 
 
+# Must match MAX_BYTES in dalton-agent/linter/guard.py. Its own constant here
+# so the controller can refuse an oversized buffer before paying to parse it.
+MAX_RULE_CHECK_BYTES = 64 * 1024
+
+
+def _oversize_diagnostic():
+    """Shaped like a language-server diagnostic so the editor renders it inline
+    rather than treating an ordinary refusal as a failure."""
+    return {
+        "range": {
+            "start": {"line": 0, "character": 0},
+            "end": {"line": 0, "character": 0},
+        },
+        "message": (
+            f"Too much text to syntax check (limit {MAX_RULE_CHECK_BYTES // 1024} KB). "
+            "The rules can still be submitted as a job."
+        ),
+        "source": "Dalton",
+        "severity": 1,
+        "content": "",
+        "sid": 0,
+    }
+
+
 @dalton_blueprint.route("/dalton/controller_api/check_rules", methods=["POST"])
 @check_user
 def api_check_rules():
@@ -830,18 +854,39 @@ def api_check_rules():
     this backs an optional convenience and must never cost the page
     anything beyond its own diagnostics. Job submission never goes near
     this endpoint."""
+    # The linter's own limit is 64KB, but it only sees the buffer after two
+    # hops, and MAX_CONTENT_LENGTH here is a gigabyte because it is sized for
+    # pcap uploads. Without this a huge "rules" string is parsed, re-serialised
+    # and re-encoded in a development server that spawns an unbounded thread
+    # per request, before anything rejects it.
+    if request.content_length and request.content_length > MAX_RULE_CHECK_BYTES * 2:
+        return jsonify({"available": True, "diagnostics": [_oversize_diagnostic()]})
+
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         data = {}
+    rules = data.get("rules") or ""
+    if not isinstance(rules, str):
+        return jsonify({"error": "'rules' must be a string"}), 400
+    if len(rules.encode("utf-8", "replace")) > MAX_RULE_CHECK_BYTES:
+        return jsonify({"available": True, "diagnostics": [_oversize_diagnostic()]})
+
     payload = {
-        "rules": data.get("rules") or "",
+        "rules": rules,
         "engine_analysis": bool(data.get("engine_analysis", False)),
     }
     body = _linter_fail_open_post(RULE_CHECK_URL, RULE_CHECK_TIMEOUT, payload)
     if body is None:
         return jsonify({"available": False})
-    body["available"] = True
-    return jsonify(body)
+    # Only the two fields the page uses, rather than whatever the linter
+    # returned, so a field added there later cannot leak through this proxy.
+    return jsonify(
+        {
+            "available": True,
+            "diagnostics": body.get("diagnostics", []),
+            "engine_version": body.get("engine_version"),
+        }
+    )
 
 
 @dalton_blueprint.route("/dalton/sensor_api/update/", methods=["POST"])

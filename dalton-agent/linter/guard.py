@@ -26,6 +26,22 @@ SLS_DIRECTIVE = re.compile(r"^\s*##\s*SLS\b")
 # to follow directly (optionally through whitespace) after 'lua'/'luajit'.
 LUA_KEYWORD = re.compile(r"\blua(?:jit)?\s*:")
 
+# The ordinary `dataset:` rule keyword, not a "## SLS" directive, which is why
+# it needs its own rule. _rules_buffer_prepare_dataset() takes the
+# load/save/state target straight out of the rule and does
+# shutil.copyfile/open(..., "w") on os.path.join(tmpdir, target) with no
+# sanitisation. os.path.join does not contain a traversal: "../x" escapes the
+# temporary directory and an absolute path replaces it outright, so an
+# unchecked target is a create-or-truncate primitive at any path the linter
+# user can write. The container's read_only rootfs is what stops that today.
+#
+# Legitimate use is a bare filename, so that is all we allow. Every
+# load/save/state target on a line mentioning dataset: is checked, which is
+# looser than SLS's own single-match regex and so errs the safe way.
+DATASET_KEYWORD = re.compile(r"\bdataset\s*:", re.IGNORECASE)
+DATASET_TARGET = re.compile(r"\b(?:load|save|state)\s+([^\s;]+)", re.IGNORECASE)
+SAFE_DATASET_NAME = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
+
 MAX_BYTES = 64 * 1024
 MAX_LINES = 200
 
@@ -43,7 +59,13 @@ class GuardRejection(Exception):
 def check_rule_buffer(buffer):
     """Raise GuardRejection if `buffer` isn't safe to hand to SLS. Returns
     None on success."""
-    size = len(buffer.encode("utf-8"))
+    try:
+        size = len(buffer.encode("utf-8"))
+    except UnicodeEncodeError:
+        # JSON permits lone surrogates, which are not encodable text. Refuse
+        # them here rather than letting .encode() raise out of the request.
+        raise GuardRejection("Rules must be valid UTF-8 text.") from None
+
     if size > MAX_BYTES:
         raise GuardRejection(
             f"Rule buffer is {size} bytes, over the {MAX_BYTES}-byte limit."
@@ -69,3 +91,11 @@ def check_rule_buffer(buffer):
                 "load a Lua script from disk next to the rules.",
                 line=lineno,
             )
+        if DATASET_KEYWORD.search(line):
+            for target in DATASET_TARGET.findall(line):
+                if not SAFE_DATASET_NAME.match(target):
+                    raise GuardRejection(
+                        "A 'dataset' file must be a plain filename here; "
+                        f"{target!r} is not one.",
+                        line=lineno,
+                    )

@@ -136,3 +136,50 @@ class TestSizeLimits(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDatasetTargets(unittest.TestCase):
+    """`dataset:` is an ordinary rule keyword rather than a "## SLS" directive,
+    but SLS acts on it too: it copies or creates the named file, joining the
+    name onto its temp directory without sanitising it. os.path.join does not
+    contain a traversal, so these have to be rejected here."""
+
+    def rule(self, fragment):
+        return f'alert http any any -> any any (msg:"x"; {fragment} sid:1;)'
+
+    def rejects(self, fragment):
+        try:
+            guard.check_rule_buffer(self.rule(fragment))
+        except guard.GuardRejection:
+            return True
+        return False
+
+    def test_traversal_is_rejected(self):
+        self.assertTrue(self.rejects("dataset:isset,d, load ../pwned;"))
+
+    def test_absolute_path_is_rejected(self):
+        # os.path.join(tmpdir, "/etc/shadow") is "/etc/shadow" -- the temp
+        # directory is discarded entirely, so this is the dangerous one.
+        self.assertTrue(self.rejects("dataset:isset,d, load /etc/shadow;"))
+
+    def test_subdirectory_and_dotfile_are_rejected(self):
+        self.assertTrue(self.rejects("dataset:isset,d, load sub/dir;"))
+        self.assertTrue(self.rejects("dataset:isset,d, load .hidden;"))
+
+    def test_every_operation_is_checked(self):
+        for op in ("load", "save", "state"):
+            with self.subTest(op=op):
+                self.assertTrue(self.rejects(f"dataset:isset,d, {op} ../escape;"))
+
+    def test_plain_filenames_are_allowed(self):
+        for name in ("mydata", "my_data.lst", "hosts-v2.txt"):
+            with self.subTest(name=name):
+                self.assertFalse(self.rejects(f"dataset:isset,d, load {name};"))
+
+    def test_rules_without_dataset_are_untouched(self):
+        self.assertFalse(self.rejects('content:"load /etc/shadow";'))
+
+    def test_lone_surrogate_is_refused_not_raised(self):
+        # JSON permits lone surrogates; encoding one to UTF-8 raises.
+        with self.assertRaises(guard.GuardRejection):
+            guard.check_rule_buffer("\ud800")
