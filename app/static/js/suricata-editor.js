@@ -19,11 +19,16 @@
   // short without putting a room full of people through a request per
   // keystroke.
   var CHECK_DEBOUNCE_MS = 1500;
+  // Info and Hint are collapsed into one "note" level. Engine analysis is on
+  // by default and nearly everything it reports is a Hint; the LSP distinction
+  // between the two is invisible to anyone who does not already know the
+  // scale, and "hint" reads as advice being withheld rather than as a fact
+  // being reported.
   var SEVERITY = {
     1: { cm: "error", label: "error", cls: "suri-diag-error" },
     2: { cm: "warning", label: "warning", cls: "suri-diag-warning" },
-    3: { cm: "info", label: "info", cls: "suri-diag-info" },
-    4: { cm: "hint", label: "hint", cls: "suri-diag-hint" },
+    3: { cm: "note", label: "note", cls: "suri-diag-note" },
+    4: { cm: "note", label: "note", cls: "suri-diag-note" },
   };
   // Emitted once per rule by engine analysis; a classification, not
   // something to act on, and at one line per rule it buries everything
@@ -295,11 +300,14 @@
     }
   }
 
-  // LSP severities (1 Error, 2 Warning, 3 Info, 4 Hint) collapse to
-  // CodeMirror's two gutter marker styles; the message text (shown in the
-  // tooltip) still carries the real distinction.
+  // The lint addon's severity is a free-form string: it concatenates it into
+  // CodeMirror-lint-marker-<severity> and friends. Its own stylesheet ships
+  // icons for "error" and "warning" only, so mapping notes onto "warning" --
+  // the obvious way to avoid a blank 16px gutter -- put a warning triangle
+  // beside messages that are not warnings. suricata-editor.css supplies the
+  // "note" icon instead.
   function lspSeverityToCmSeverity(severity) {
-    return severity === 1 ? "error" : "warning";
+    return (SEVERITY[severity] || SEVERITY[2]).cm;
   }
 
   // Suricata can emit the same note more than once for one rule: engine
