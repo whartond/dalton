@@ -327,17 +327,32 @@
     });
   }
 
-  // Line order keeps the list aligned with the editor above it; severity breaks
-  // ties so an error leads the warning on the same line rather than whichever
-  // the engine happened to emit first.
+  // Severity first, line second. Sorting by line kept the panel aligned with
+  // the editor, but it put an error in the fortieth rule below thirty-nine
+  // notes -- and the panel is a fixed height that scrolls, so "1 error" in the
+  // status line could point at a row that was not on screen. Each row carries
+  // its line number as a link, so ordering is not what makes a finding
+  // reachable.
+  //
+  // Rank rather than raw severity: Information and Hint render identically as
+  // notes, so sorting on the LSP value would order two visually identical rows
+  // by a distinction the reader cannot see, and break line order between them
+  // for no visible reason.
+  function severityRank(severity) {
+    var value = severity || 2;
+    return value >= 3 ? 3 : value;
+  }
+
   function sortDiagnostics(diags) {
     return diags.slice().sort(function (a, b) {
+      var ra = severityRank(a.severity);
+      var rb = severityRank(b.severity);
+      if (ra !== rb) {
+        return ra - rb;
+      }
       var la = a.range && a.range.start ? a.range.start.line : 0;
       var lb = b.range && b.range.start ? b.range.start.line : 0;
-      if (la !== lb) {
-        return la - lb;
-      }
-      return (a.severity || 2) - (b.severity || 2);
+      return la - lb;
     });
   }
 
