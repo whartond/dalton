@@ -1382,8 +1382,9 @@ The feature is a convenience, not a dependency: if the ``linter`` container
 is unreachable, unhealthy, or disabled, the controller fails open and the
 coverage page simply loses syntax highlighting/checking, with everything
 else -- including job submission -- unaffected. To disable it entirely,
-remove or comment out the ``rule_check_url`` / ``keywords_url`` settings in
-``dalton.conf``; because ``dalton.conf`` is baked into the controller image
+remove, comment out, or leave empty the ``rule_check_url`` / ``keywords_url``
+settings in ``dalton.conf`` (an absent or empty URL means "off"; there is no
+built-in default); because ``dalton.conf`` is baked into the controller image
 at build time (see ``Dockerfile-dalton``), this requires rebuilding the
 controller image, not just restarting it.
 

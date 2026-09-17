@@ -90,6 +90,10 @@
     options: [
       { regex: /#.*/, token: "comment" },
       { regex: /"(?:[^\\"]|\\.)*"/, token: "string" },
+      // A string still being typed (no closing quote yet on this line) is a
+      // string too, so completion stays quiet inside a half-written msg or
+      // content value rather than offering keywords in the middle of it.
+      { regex: /"(?:[^\\"]|\\.)*$/, token: "string" },
       // Any word immediately followed by ':' or ';' is treated as an option
       // name, rather than matching against an enumerated keyword list, so
       // keywords the completion data has never heard of still colour
@@ -182,10 +186,19 @@
 
   // Rule options live between the header's parens. Completing outside them
   // offers option keywords where only an action, protocol, address or port is
-  // legal, which fights the user on every line.
+  // legal, which fights the user on every line. Ask the mode rather than
+  // scanning the line for parens: a scan sees the ')' inside a pcre or
+  // content string and gives up on the rest of that rule, and it never
+  // recognises the continuation lines of a multi-line rule at all. The
+  // simple-mode state carries across lines and skips over strings, so it
+  // knows where it is in both cases. A cursor inside a string is not a
+  // keyword position either, whatever state the mode is in.
   function inOptions(cm, cursor) {
-    var before = (cm.getLine(cursor.line) || "").slice(0, cursor.ch);
-    return before.lastIndexOf("(") > before.lastIndexOf(")");
+    var token = cm.getTokenAt(cursor);
+    if (token.type === "string") {
+      return false;
+    }
+    return !!(token.state && token.state.state === "options");
   }
 
   function suricataHint(cm) {
@@ -456,18 +469,21 @@
       checkPending = true;
       return;
     }
-    // Set before anything async happens - see the comment on
-    // hasCheckResult's declaration for why this, not the fetch resolving,
-    // is what closes the race with fetchKeywords().
-    hasCheckResult = true;
     var rules = cm.getValue();
     if (!rules.trim()) {
+      // Nothing to check, so nothing to say. hasCheckResult stays as it was:
+      // setting it here would silence fetchKeywords()'s status line for good
+      // on the common case of enabling the editor over an empty box.
       latestLintResults = [];
       clearResults();
       setStatus("");
       cm.performLint();
       return;
     }
+    // Set before anything async happens - see the comment on
+    // hasCheckResult's declaration for why this, not the fetch resolving,
+    // is what closes the race with fetchKeywords().
+    hasCheckResult = true;
 
     var engineAnalysisCheckbox = document.getElementById("optionEngineAnalysis");
     var engineAnalysis = engineAnalysisCheckbox

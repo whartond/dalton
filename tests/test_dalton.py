@@ -276,10 +276,21 @@ class TestRuleKeywordsProxy(unittest.TestCase):
 
         self.dalton_module = dalton_module
         # the in-process cache is module-level state; don't leak it between tests
-        self.dalton_module._keywords_cache = None
+        self._reset_cache()
 
     def tearDown(self):
+        self._reset_cache()
+
+    def _reset_cache(self):
         self.dalton_module._keywords_cache = None
+        self.dalton_module._keywords_cache_time = 0.0
+
+    def _expire_cache(self):
+        """Age the cached payload past KEYWORDS_CACHE_TTL so the next request
+        goes back to the linter."""
+        self.dalton_module._keywords_cache_time -= (
+            self.dalton_module.KEYWORDS_CACHE_TTL + 1
+        )
 
     def _mock_response(self, status=200, body=b'{"keywords": ["sid"]}'):
         resp = mock.MagicMock()
@@ -351,12 +362,38 @@ class TestRuleKeywordsProxy(unittest.TestCase):
         res = self.client.get("/dalton/controller_api/rule_keywords")
         self.assertTrue(json.loads(res.data)["available"])
 
+        self._expire_cache()
         urlopen.side_effect = ConnectionRefusedError()
         res = self.client.get("/dalton/controller_api/rule_keywords")
         data = json.loads(res.data)
         self.assertTrue(data["available"])
         self.assertTrue(data["stale"])
         self.assertEqual(data["keywords"], ["sid"])
+
+    @mock.patch("app.dalton.urllib.request.urlopen")
+    def test_fresh_cache_does_not_hit_linter(self, urlopen):
+        """Within the TTL the cached payload is served without a round trip,
+        and it is reported as fresh, not stale."""
+        urlopen.return_value = self._mock_response()
+        self.client.get("/dalton/controller_api/rule_keywords")
+        self.assertEqual(urlopen.call_count, 1)
+
+        urlopen.side_effect = AssertionError("linter must not be contacted")
+        res = self.client.get("/dalton/controller_api/rule_keywords")
+        data = json.loads(res.data)
+        self.assertEqual(urlopen.call_count, 1)
+        self.assertTrue(data["available"])
+        self.assertFalse(data["stale"])
+        self.assertEqual(data["keywords"], ["sid"])
+
+    @mock.patch("app.dalton.urllib.request.urlopen")
+    def test_cached_payload_not_polluted_by_response_flags(self, urlopen):
+        """The available/stale flags are added to the response, not to the
+        stored payload, so a later stale serve cannot inherit stale=False."""
+        urlopen.return_value = self._mock_response()
+        self.client.get("/dalton/controller_api/rule_keywords")
+        self.assertNotIn("stale", self.dalton_module._keywords_cache)
+        self.assertNotIn("available", self.dalton_module._keywords_cache)
 
 
 @pytest.mark.usefixtures("client")

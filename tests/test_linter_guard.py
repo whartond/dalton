@@ -134,10 +134,6 @@ class TestSizeLimits(unittest.TestCase):
         guard.check_rule_buffer('alert tcp any any -> any any (msg:"x"; sid:1;)')
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestDatasetTargets(unittest.TestCase):
     """`dataset:` is an ordinary rule keyword rather than a "## SLS" directive,
     but SLS acts on it too: it copies or creates the named file, joining the
@@ -183,3 +179,7 @@ class TestDatasetTargets(unittest.TestCase):
         # JSON permits lone surrogates; encoding one to UTF-8 raises.
         with self.assertRaises(guard.GuardRejection):
             guard.check_rule_buffer("\ud800")
+
+
+if __name__ == "__main__":
+    unittest.main()

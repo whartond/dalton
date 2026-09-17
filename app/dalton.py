@@ -102,18 +102,14 @@ try:
     ENABLE_QUEUE_CLEARING = dalton_config.getboolean("dalton", "enable_queue_clearing")
     # Suricata rule syntax checking (optional; the linter container is a
     # convenience, not a dependency - the controller fails open if it's
-    # unreachable). Defaulted in code rather than to "" because dalton.conf
-    # is COPYd into the controller image at build time, not bind-mounted;
-    # an older image would otherwise silently report "not configured".
-    RULE_CHECK_URL = dalton_config.get(
-        "dalton", "rule_check_url", fallback="http://dalton_linter:8081/check"
-    )
+    # unreachable). dalton.conf is the single source of truth: an absent or
+    # empty URL means the feature is off, which is what README.rst and
+    # dalton.conf tell operators removing the keys will do.
+    RULE_CHECK_URL = dalton_config.get("dalton", "rule_check_url", fallback="")
     RULE_CHECK_TIMEOUT = dalton_config.getint(
         "dalton", "rule_check_timeout", fallback=6
     )
-    KEYWORDS_URL = dalton_config.get(
-        "dalton", "keywords_url", fallback="http://dalton_linter:8081/keywords"
-    )
+    KEYWORDS_URL = dalton_config.get("dalton", "keywords_url", fallback="")
     DEBUG = dalton_config.getboolean("dalton", "debug")
     AUTH_PREFIX = dalton_config.get("dalton", "auth_prefix")
     AUTH_MAX = dalton_config.getint("dalton", "auth_max")
@@ -748,39 +744,26 @@ def get_engine_conf_file(sensor):
         return engine_config
 
 
-def _linter_fail_open_get(url, timeout):
-    """GET a linter URL and return the parsed JSON object, or None on any
-    failure. This backs an optional convenience (rule syntax checking /
-    keyword completion); a broken or unreachable linter must never cost the
-    page anything beyond that feature, so every failure mode - missing
-    config, connection refused, timeout, non-200, unparseable body, and
-    valid-JSON-but-not-an-object - is treated identically as "unavailable".
+def _linter_fail_open(url, timeout, payload=None):
+    """GET a linter URL (or POST `payload` as JSON to it) and return the
+    parsed JSON object, or None on any failure. This backs an optional
+    convenience (rule syntax checking / keyword completion); a broken or
+    unreachable linter must never cost the page anything beyond that
+    feature, so every failure mode - missing config, connection refused,
+    timeout, non-200, unparseable body, and valid-JSON-but-not-an-object -
+    is treated identically as "unavailable".
     """
     if not url:
         return None
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            if resp.status != 200:
-                return None
-            body = json.loads(resp.read())
-    except Exception:
-        return None
-    if not isinstance(body, dict):
-        return None
-    return body
-
-
-def _linter_fail_open_post(url, timeout, payload):
-    """POST a JSON payload to a linter URL and return the parsed JSON
-    object, or None on any failure. Same fail-open contract as
-    _linter_fail_open_get."""
-    if not url:
-        return None
-    try:
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            url, data=data, headers={"Content-Type": "application/json"}
-        )
+        if payload is None:
+            req = urllib.request.Request(url)
+        else:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             if resp.status != 200:
                 return None
@@ -792,24 +775,38 @@ def _linter_fail_open_post(url, timeout, payload):
     return body
 
 
+# The keyword payload only changes when the linter container is rebuilt, so
+# a successful fetch is served from memory for this long before the linter
+# is asked again. Page loads with the editor preference on would otherwise
+# each pull the full keyword list through the same two gunicorn workers that
+# serve syntax checks.
+KEYWORDS_CACHE_TTL = 600
 _keywords_cache = None
+_keywords_cache_time = 0.0
 
 
 @dalton_blueprint.route("/dalton/controller_api/rule_keywords", methods=["GET"])
 @check_user
 def api_get_rule_keywords():
     """Proxy to the linter's /keywords endpoint (Suricata keyword completion
-    data and hover docs), cached in-process. Fails open: any problem
-    reaching the linter falls back to the last successfully cached response
-    (marked stale) so a linter outage degrades completion to stale, not
-    absent; only a never-yet-successful linter reports unavailable. The
-    payload only changes when the linter container is rebuilt, so a simple
-    module-level cache is enough for the single-process dev server this
-    controller runs on."""
-    global _keywords_cache
-    body = _linter_fail_open_get(KEYWORDS_URL, RULE_CHECK_TIMEOUT)
+    data and hover docs), cached in-process. A fetch younger than
+    KEYWORDS_CACHE_TTL is served from memory without asking the linter.
+    Fails open: any problem reaching the linter falls back to the last
+    successfully cached response (marked stale) so a linter outage degrades
+    completion to stale, not absent; only a never-yet-successful linter
+    reports unavailable. A module-level cache is enough for the
+    single-process dev server this controller runs on."""
+    global _keywords_cache, _keywords_cache_time
+    now = time.monotonic()
+    if _keywords_cache is not None and now - _keywords_cache_time < KEYWORDS_CACHE_TTL:
+        fresh = dict(_keywords_cache)
+        fresh["available"] = True
+        fresh["stale"] = False
+        return jsonify(fresh)
+    body = _linter_fail_open(KEYWORDS_URL, RULE_CHECK_TIMEOUT)
     if body is not None:
-        _keywords_cache = body
+        _keywords_cache = dict(body)
+        _keywords_cache_time = now
         body["available"] = True
         body["stale"] = False
         return jsonify(body)
@@ -875,7 +872,7 @@ def api_check_rules():
         "rules": rules,
         "engine_analysis": bool(data.get("engine_analysis", False)),
     }
-    body = _linter_fail_open_post(RULE_CHECK_URL, RULE_CHECK_TIMEOUT, payload)
+    body = _linter_fail_open(RULE_CHECK_URL, RULE_CHECK_TIMEOUT, payload)
     if body is None:
         return jsonify({"available": False})
     # Only the two fields the page uses, rather than whatever the linter
