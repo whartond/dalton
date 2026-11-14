@@ -1358,6 +1358,20 @@ behind it, builds a realistic pcap that fires the rule, and proves it by
 running the pcap through Dalton on every Suricata version available. It
 reports what is confirmed by public sources and what was invented.
 
+.. note::
+
+   rule2pcap has sundry uses, but proving that a rule detects real threat
+   traffic is not one of them. If you develop rules and want a test case
+   that shows a rule catches the exploit, malware or other malicious
+   behavior it targets, start from a capture of that traffic. A pcap built
+   afterwards from the rule itself begs the question: it shows the rule
+   matches what the rule describes, not that it matches the threat.
+
+   If you want a pcap that checks a rule's syntax and structure (that it
+   loads, that its buffers, modifiers and options do what you expect, and
+   that it fires on traffic of the shape it describes), rule2pcap is a good
+   fit.
+
 The skill is plain files: ``SKILL.md`` holds the instructions, ``scripts/``
 holds helper tools, ``templates/`` holds starting build scripts, and
 ``references/`` holds background notes. Any agent that reads the Agent Skills

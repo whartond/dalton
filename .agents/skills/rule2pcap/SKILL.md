@@ -105,6 +105,11 @@ file. Accept supporting rules too, such as the rule that sets a flowbit the
 target checks. Snort rules are out of scope for now; say so if you're
 given one.
 
+If the user wants the pcap as evidence that the rule detects a real
+exploit or malware, say once that a pcap built from the rule begs the
+question; a capture of the real traffic is the test for that. This pcap
+checks the rule's syntax and structure. Then carry on if they still want it.
+
 Save the rules to `$WORK/test.rules`, then run `rule_facts.py` (step 2) to
 get `suggested_dir`. Create `$OUT`, and move `test.rules` into it.
 
