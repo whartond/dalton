@@ -68,8 +68,8 @@ research.
    - **`dalton` is true:** use Dalton for all testing. This is the normal
      path. `engines` lists the versions `test` and `validate` will use:
      one agent per version. `sensors` lists every agent; one named like
-     `suricata/8.0.6/ctf` runs a custom config and is used only if you pass
-     it with `--engine-tech`.
+     `suricata/8.0.6/ctf` runs a custom config, and is used only when no
+     stock agent runs that version or you pass it with `--engine-tech`.
    - **Dalton is unreachable:** if the URL is local, the user may need to
      start it (`./start-dalton.sh` in the Dalton repo). Ask them; don't
      start it yourself.
@@ -141,7 +141,8 @@ Save the rules to `$WORK/rule2pcap-output/test.rules`, then run
      lack a keyword (`unknown_keywords`). That's a version requirement,
      not an error.
    - `valid: false` means a real syntax problem, unless `not_run` lists an
-     engine: its job didn't finish (exit code 2), so run it again.
+     engine: it didn't run (exit code 2). See "Engines that didn't run" in
+     step 5.
 3. **Tell the user about any error-level notes and every real syntax
    error.** Don't rewrite the rule silently. Small obvious typos are worth
    pointing out. Don't try to be clever about style.
@@ -233,10 +234,12 @@ $VENV/bin/python $SKILL/scripts/dalton_client.py test --pcap <name>.pcap --rules
   older versions without a keyword the rule uses. Their `expected_fired`
   is null and they don't count against the pass. Report them as "needs
   Suricata N or later", not as failures.
-- **Engines that didn't run:** `not_run` lists jobs that timed out, were
-  interrupted or crashed. Nothing is known about them, so the test fails
-  with exit code 2. Run it again, perhaps with a longer `--timeout`; if it
-  keeps happening, tell the user.
+- **Engines that didn't run:** `not_run` lists engines that never read the
+  pcap: the job timed out, was interrupted or crashed, or the engine
+  stopped on an error. Nothing is known about them, so the test fails with
+  exit code 2. Read that result's `errors` first: a config error, such as a
+  bad `--set`, needs fixing, not rerunning. Otherwise run it again, perhaps
+  with a longer `--timeout`; if it keeps happening, tell the user.
 - **Anomalies:** read `anomalies` in the test output. Unexpected
   `applayer:` events (and `stream:` events, on configs that log them;
   Dalton's stock configs don't) usually mean malformed traffic, even when

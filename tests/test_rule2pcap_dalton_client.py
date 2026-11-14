@@ -2,6 +2,7 @@ import email.parser
 import email.policy
 import json
 import os
+import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -12,6 +13,17 @@ from tests.rule2pcap_scripts import load
 dc = load("dalton_client")
 
 CONF = '%YAML 1.1\n---\nvars:\n  address-groups:\n    HOME_NET: "[10.0.0.0/8]"\nstream:\n  inline: auto\n'
+# Dalton's error page, trimmed: app/templates/dalton/error.html in the site layout
+ERROR_PAGE = """<!DOCTYPE html><html><head>
+<link href="/static/css/bootstrap.css" rel="stylesheet">
+<style>body { padding-top: 60px; }</style></head><body>
+<div class="navbar"><ul class="nav"><li class="active"><a href="/">Dalton Home</a>&nbsp;</li>
+<li><a href="/dalton/queue">Queue</a></li><li><a href="/dalton/sensor">Sensors</a></li></ul></div>
+<div class="container"><div class="row">
+<div class="alert alert-error"><h2><span>Error!</span></h2></div><p/>
+<div class="span9">
+<p>Invalid rule, action (start of rule) &quot;(msg:&quot; not supported.</p>
+</div></div></div></body></html>"""
 EVE = "\n".join(
     json.dumps(e)
     for e in (
@@ -97,6 +109,14 @@ class FakeDalton:
                         "203.0.113.5:80 -> 10.0.0.5:49152\n"
                     )
                     ids = "Suricata version 8.0.6 RELEASE\n"
+                    if state.mode == "engine-stopped":
+                        # e.g. a bad --set: the job is done but no pcap was read
+                        error = (
+                            "Error message(s) found in IDS output.\n\n"
+                            'Error: runmodes: The custom type "bogus" doesn\'t exist\n'
+                        )
+                    else:
+                        ids += "Notice: pcap: read 1 file, 3 packets, 300 bytes\n"
                     if state.mode == "ids-only-error":
                         # Suricata's own format, which the agent's error filter misses
                         ids += (
@@ -128,10 +148,7 @@ class FakeDalton:
                     form[name] = part.get_payload(decode=True)
                 state.submissions.append(form)
                 if state.mode == "error":
-                    self.reply(
-                        200,
-                        "<html><ul><li>You must specify a PCAP file.</li></ul></html>",
-                    )
+                    self.reply(200, ERROR_PAGE)
                 elif b"teapotJob" in b"".join(k.encode() for k in form):
                     jid = f"teapot_{len(state.submissions):016x}"
                     state.job_tech[jid] = form["sensor_tech"].decode()
@@ -315,7 +332,10 @@ def test_submission_error_page_is_reported(dalton, files, capsys):
         ["test", "--url", dalton.url, "--pcap", str(pcap), "--rules", str(rules)],
     )
     assert code == 2
-    assert "You must specify a PCAP file." in report["error"]
+    assert report["error"].endswith(
+        'Invalid rule, action (start of rule) "(msg:" not supported.'
+    )
+    assert "Dalton Home" not in report["error"] and "padding" not in report["error"]
 
 
 def test_docker_dry_run_prints_commands_and_runs_nothing(files, capsys, tmp_path):
@@ -339,7 +359,8 @@ def test_docker_dry_run_prints_commands_and_runs_nothing(files, capsys, tmp_path
     )
     assert code == 0 and report["dry_run"] is True
     (cmd,) = report["commands"]
-    assert cmd.startswith("docker run --rm --name rule2pcap-")
+    # never pulls an image: the docker runner uses local images only
+    assert cmd.startswith("docker run --rm --pull never --name rule2pcap-")
     assert " --network none " in cmd
     # nothing was created: the paths are placeholders for a real run's temp dir
     assert "rule2pcap-XXXXXXXX" in cmd and "rule2pcap-XXXXXXXX" in report["note"]
@@ -448,3 +469,82 @@ def test_nothing_to_check_fails(dalton, files, capsys, tmp_path):
         ["test", "--url", dalton.url, "--pcap", str(pcap), "--rules", str(rules)],
     )
     assert code == 1 and report["pass"] is False and "no sids" in report["error"]
+
+
+@pytest.mark.parametrize("command", ["test", "validate"])
+def test_engine_that_stopped_before_the_pcap_is_not_run(dalton, files, capsys, command):
+    # e.g. --set runmode=bogus: Dalton marks the job done, but nothing was read
+    pcap, rules = files
+    dalton.mode = "engine-stopped"
+    argv = [command, "--url", dalton.url, "--rules", str(rules)]
+    if command == "test":
+        argv += ["--pcap", str(pcap)]
+    code, report = run(capsys, argv)
+    assert code == 2
+    assert report["not_run"] == ["suricata/8.0.6", "suricata/7.0.17"]
+    assert report["not_loaded"] == []
+    assert report.get("pass", report.get("valid")) is False
+    assert "runmodes" in report["results"][0]["errors"]
+
+
+def test_alerting_sids_edge_cases():
+    rules = (
+        'alert tcp any any -> any any (msg:"x"; noalert; \\\n'
+        "  sid:1;)\n"
+        'pass tcp any any -> any any (msg:"p"; sid:2;)\n'
+        'alert tcp any any -> any any (msg:"has sid:3; in msg"; sid:4;)\n'
+        'alert tcp any any -> any any (msg:"two \\\n'
+        '  lines"; sid:5;)\n'
+    )
+    assert dc.alerting_sids(rules) == ["4", "5"]
+
+
+def test_continued_rules_are_sent_joined(dalton, files, capsys, tmp_path):
+    pcap, _ = files
+    rules = tmp_path / "multi.rules"
+    rules.write_text(
+        'alert http any any -> any any (msg:"TEST one"; \\\n    sid:1000001;)\n'
+    )
+    code, report = run(
+        capsys,
+        ["test", "--url", dalton.url, "--pcap", str(pcap), "--rules", str(rules)],
+    )
+    assert code == 0 and report["expect"] == ["1000001"]
+    sent = dalton.submissions[0]["custom_ruleset"].decode()
+    assert sent == 'alert http any any -> any any (msg:"TEST one";     sid:1000001;)\n'
+
+
+def test_docker_keep_logs_reuse_starts_clean(files, capsys, tmp_path, monkeypatch):
+    pcap, rules = files
+    keep = tmp_path / "logs"
+    runs = []
+
+    def fake_run(cmd, **kwargs):
+        # stands in for docker: appends one alert to eve.json, as Suricata does
+        log_dir = next(v.split(":")[0] for v in cmd if str(v).endswith(":/out"))
+        sid = 1000001 if not runs else 2
+        runs.append(sid)
+        with open(os.path.join(log_dir, "eve.json"), "a") as fh:
+            alert = {"event_type": "alert", "alert": {"signature_id": sid}}
+            fh.write(json.dumps(alert) + "\n")
+        out = "i: pcap: read 1 file, 3 packets, 300 bytes\n"
+        return subprocess.CompletedProcess(cmd, 0, out, "")
+
+    monkeypatch.setattr(dc.subprocess, "run", fake_run)
+    argv = [
+        "test",
+        "--runner",
+        "docker",
+        "--image",
+        "suricata-current:latest",
+        "--pcap",
+        str(pcap),
+        "--rules",
+        str(rules),
+        "--keep-logs",
+        str(keep),
+    ]
+    assert run(capsys, argv)[0] == 0
+    code, report = run(capsys, argv)
+    # the second run's alert only, not the first run's left in the reused directory
+    assert code == 1 and list(report["results"][0]["fired"]) == ["2"]

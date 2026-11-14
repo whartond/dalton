@@ -119,6 +119,10 @@ HEADER_KEYWORDS = {
     "window",
     "seq",
     "ack",
+    "tcp.seq",
+    "tcp.ack",
+    "tcp.window",
+    "tcp.wscale",
     "tcp.mss",
     "ipv4.hdr",
     "ipv6.hdr",
@@ -534,15 +538,23 @@ def add_notes(facts):
     for kind in ("threshold", "detection_filter"):
         spec = facts[kind]
         if spec:
+            count = spec.get("count", "?")
+            if kind == "detection_filter":
+                # alerts start once the count is exceeded
+                need = f"{int(count) + 1}" if count.isdigit() else f"{count} + 1"
+                what = f"more than {count} matching events (alerts from match {need})"
+            elif spec.get("type") == "limit":
+                what = f"one matching event (it limits alerts to {count})"
+            else:
+                what = f"at least {count} matching events"
             notes.append(
                 note(
                     "info",
                     kind,
-                    f"needs at least {spec.get('count', '?')} matching events in "
-                    f"{spec.get('seconds', '?')}s tracked {spec.get('track', '?')}; "
-                    "a content match can count twice (packet and stream). Dalton "
-                    "jobs place threshold alerts nondeterministically; judge by "
-                    "whether it fires",
+                    f"needs {what} in {spec.get('seconds', '?')}s tracked "
+                    f"{spec.get('track', '?')}; a content match can count twice "
+                    "(packet and stream). Test with --set runmode=single so the "
+                    "alert lands on the same packet every run",
                 )
             )
     for name, purpose in EXTERNAL_KEYWORDS.items():

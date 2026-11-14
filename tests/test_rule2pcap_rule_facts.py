@@ -266,3 +266,25 @@ def test_standalone_noalert_note():
         'alert tcp any any -> any any (msg:"x"; content:"a"; noalert; sid:1;)'
     )
     assert "noalert" in codes(rule["notes"])
+
+
+@pytest.mark.parametrize(
+    "option, wanted",
+    [
+        ("threshold:type threshold,track by_src,count 5,seconds 60", "at least 5"),
+        ("threshold:type both,track by_src,count 5,seconds 60", "at least 5"),
+        ("threshold:type limit,track by_src,count 5,seconds 60", "one matching event"),
+        ("detection_filter:track by_src,count 5,seconds 60", "from match 6"),
+    ],
+)
+def test_threshold_note_per_type(option, wanted):
+    rule = one_rule(
+        f'alert tcp any any -> any any (msg:"x"; content:"a"; {option}; sid:1;)'
+    )
+    message = " ".join(n["message"] for n in rule["notes"])
+    assert wanted in message and "runmode=single" in message
+
+
+def test_tcp_header_keywords_get_header_fields_note():
+    rule = one_rule('alert tcp any any -> any any (msg:"x"; tcp.seq:0; sid:1;)')
+    assert "header-fields" in codes(rule["notes"])

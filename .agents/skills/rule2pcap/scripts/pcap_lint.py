@@ -42,6 +42,12 @@ EPOCH_2000 = 946684800
 SEQ_MOD = 2**32
 
 
+def address_key(address):
+    """Sort key for a mix of IPv4 and IPv6 addresses (which don't compare)."""
+    ip = ipaddress.ip_address(address)
+    return (ip.version, ip)
+
+
 def seq_after(a, b):
     """True if sequence number a is after b, allowing for wraparound."""
     return a != b and (a - b) % SEQ_MOD < 2**31
@@ -222,7 +228,7 @@ def lint(path, now=None):
             "every host sends with TTL 64, including remote ones that should "
             "arrive a few hops lower (Flowsynth's default; pcapkit.set_ip_fields)",
         )
-    public = sorted(addresses.get("public", set()), key=ipaddress.ip_address)
+    public = sorted(addresses.get("public", set()), key=address_key)
     if public:
         out.add(
             "info",
@@ -239,7 +245,7 @@ def lint(path, now=None):
         "end": iso(times[-1]) if times else None,
         "flows": [flow_summary(f) for f in flows.values()],
         "addresses": {
-            k: sorted(v, key=ipaddress.ip_address) for k, v in sorted(addresses.items())
+            k: sorted(v, key=address_key) for k, v in sorted(addresses.items())
         },
     }
     if linktypes - {1, None}:
@@ -369,8 +375,9 @@ def finish_flows(out, flows):
             out.add(
                 "warning",
                 "no-handshake",
-                f"{name}: no {missing}; Suricata picks the flow up midstream "
-                "and app-layer detection may not run",
+                f"{name}: no {missing}; with stream.midstream off (the "
+                "default) Suricata won't track the session, so stream and "
+                "app-layer detection don't run",
                 frame,
             )
         elif flow["data_before_handshake"]:

@@ -30,6 +30,7 @@ ruamel.yaml (in requirements.txt) to edit the engine config.
 """
 
 import argparse
+import html
 import http.cookiejar
 import io
 import json
@@ -262,12 +263,16 @@ class Dalton:
 
 
 def html_error(text):
-    """Pull the message out of Dalton's HTML error page."""
-    items = re.findall(r"<li[^>]*>(.*?)</li>", text, flags=re.S | re.I)
+    """Pull the message out of Dalton's HTML error page (error.html puts it in
+    <p> lines inside div.span9, after the navbar and stylesheets)."""
+    body = re.search(r'<div class="span9">(.*?)</div>', text, flags=re.S | re.I)
+    body = body.group(1) if body else text
+    body = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", body)
+    items = re.findall(r"<p\b[^>]*>(.*?)</p>", body, flags=re.S | re.I)
     if not items:
-        items = re.findall(r"<p[^>]*>(.*?)</p>", text, flags=re.S | re.I)
-    clean = [re.sub(r"<[^>]+>", "", i).strip() for i in items]
-    return " ".join(c for c in clean if c)[:500]
+        items = [body]
+    clean = [html.unescape(re.sub(r"<[^>]+>", " ", i)) for i in items]
+    return " ".join(" ".join(c.split()) for c in clean if c.strip())[:500]
 
 
 def apply_sets(conf_text, sets):
@@ -361,18 +366,26 @@ def alert_lines(fast_text, limit=20):
     return lines[:limit]
 
 
+def join_continuations(text):
+    """Join rule lines ending in a backslash, as Suricata does. Dalton checks
+    each line on its own, so a continued rule has to be sent joined."""
+    return re.sub(r"\\\r?\n", "", text)
+
+
 def alerting_sids(rules_text):
-    """Sids of rules that should alert: not commented out, not noalert."""
+    """Sids of rules that should alert: not commented out, not pass, not noalert."""
     sids = []
-    for line in rules_text.splitlines():
+    for line in join_continuations(rules_text).splitlines():
         line = line.strip()
-        if not line or line.startswith("#"):
+        if not line or line.startswith("#") or re.match(r"pass\s", line):
             continue
-        if re.search(r"flowbits\s*:\s*noalert\s*;", line) or re.search(
-            r"(^|[;(\s])noalert\s*;", line
+        # look at the options outside quoted strings (msg, content, pcre)
+        options = re.sub(r'"(?:\\.|[^"\\])*"', '""', line)
+        if re.search(r"flowbits\s*:\s*noalert\s*;", options) or re.search(
+            r"(^|[;(\s])noalert\s*;", options
         ):
             continue
-        m = re.search(r"(?:^|[;(\s])sid\s*:\s*(\d+)\s*;", line)
+        m = re.search(r"(?:^|[;(\s])sid\s*:\s*(\d+)\s*;", options)
         if m:
             sids.append(m.group(1))
     return sids
@@ -428,26 +441,30 @@ def run_dalton(args, rules_text, expect):
             eve = client.job_data(jid, "eve")
             fast = client.job_data(jid, "alert")
             fired, anomalies = summarise(parse_eve(eve), fast)
+            ids = client.job_data(jid, "ids") or ""
             result.update(
                 fired=fired,
                 alert_lines=alert_lines(fast),
                 anomalies=anomalies,
                 expected_fired=verdict(fired, expect),
-                errors=job_errors(client, jid)[-4000:],
+                errors=job_errors(client, jid, ids)[-4000:],
+                read_pcap=bool(PCAP_READ_RE.search(ids)),
             )
         results.append(result)
     return {"runner": "dalton", "url": client.url, "results": results}
 
 
-def job_errors(client, jid):
+def job_errors(client, jid, ids=None):
     """The job's error lines: Dalton's error tab, plus rule errors from the
     engine's full output. The agent's error filter only knows some engine log
     formats (e.g. "Error: ..." but not Suricata's "E: ...")."""
     errors = (client.job_data(jid, "error") or "").strip()
     seen = {line.strip() for line in errors.splitlines()}
+    if ids is None:
+        ids = client.job_data(jid, "ids") or ""
     extra = [
         line.strip()
-        for line in (client.job_data(jid, "ids") or "").splitlines()
+        for line in ids.splitlines()
         if RULE_ERROR_RE.search(line) and line.strip() not in seen
     ]
     return "\n".join([errors] + extra).strip()
@@ -512,6 +529,8 @@ def docker_command(
         "docker",
         "run",
         "--rm",
+        "--pull",
+        "never",
         *(["--name", name] if name else []),
         "--network",
         "none",
@@ -533,13 +552,18 @@ def remove_container(name, attempts=60):
     """Remove a container whose docker client was killed. The daemon may
     still be creating it, so keep trying until it's gone."""
     for _ in range(attempts):
-        subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=60)
-        listed = subprocess.run(
-            ["docker", "ps", "-aq", "--filter", f"name=^{name}$"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        ).stdout.strip()
+        try:
+            subprocess.run(
+                ["docker", "rm", "-f", name], capture_output=True, timeout=60
+            )
+            listed = subprocess.run(
+                ["docker", "ps", "-aq", "--filter", f"name=^{name}$"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            ).stdout.strip()
+        except subprocess.TimeoutExpired:
+            listed = name  # the daemon is busy; try again
         if not listed:
             return
         time.sleep(1)
@@ -584,6 +608,9 @@ def run_docker(args, rules_text, expect):
     results = []
     try:
         for image, log_dir, name, cmd in plans:
+            # a reused --keep-logs directory would add this run's alerts to
+            # the last run's (Suricata appends to eve.json and fast.log)
+            shutil.rmtree(log_dir, ignore_errors=True)
             os.makedirs(log_dir, exist_ok=True)
             try:
                 proc = subprocess.run(
@@ -606,7 +633,7 @@ def run_docker(args, rules_text, expect):
             errors = "\n".join(
                 line
                 for line in output.splitlines()
-                if re.search(r"(^|[\s\]])(Error|E):|\berror\b", line)
+                if re.search(r"(^|[\s\]])(Error|E):|\berror\b|^docker:", line)
             )
             results.append(
                 {
@@ -621,6 +648,7 @@ def run_docker(args, rules_text, expect):
                     "anomalies": anomalies,
                     "expected_fired": verdict(fired, expect),
                     "errors": errors[-4000:],
+                    "read_pcap": bool(PCAP_READ_RE.search(output)),
                     "logs": log_dir if keep else None,
                 }
             )
@@ -723,7 +751,11 @@ def tiny_pcap(path):
         fh.write(frame)
 
 
-RULE_ERROR_RE = re.compile(r"(Error|E):.*(signature|rule|keyword|parse|option)", re.I)
+# A rejected rule always logs "error parsing signature" (plus the reason, e.g.
+# "unknown rule keyword"); config errors such as "Failed to parse" aren't rule errors
+RULE_ERROR_RE = re.compile(r"(Error|E):.*(signature|rule|keyword)", re.I)
+# Suricata's last word on a pcap run, logged at its default verbosity
+PCAP_READ_RE = re.compile(r"\bpcap: read \d+ file")
 
 
 def cmd_validate(args):
@@ -734,7 +766,7 @@ def cmd_validate(args):
         tiny_pcap(args.pcap)
         args.expect_sid = []
         with open(args.rules, encoding="utf-8") as fh:
-            rules_text = fh.read()
+            rules_text = join_continuations(fh.read())
         if args.runner == "docker":
             report = run_docker(args, rules_text, [])
         else:
@@ -790,7 +822,8 @@ def cmd_preflight(args):
             "test and validate use 'engines': one agent per version, stock "
             "config preferred. 'sensors' lists every agent; a third path "
             "part (e.g. suricata/8.0.6/ctf) is an agent running a custom "
-            "config, used only when passed with --engine-tech"
+            "config, used by default only when no stock agent runs that "
+            "version (or when passed with --engine-tech)"
         )
         d["reachable"], d["auth"] = True, "ok"
         try:
@@ -814,7 +847,7 @@ def cmd_preflight(args):
 
 def cmd_test(args):
     with open(args.rules, encoding="utf-8") as fh:
-        rules_text = fh.read()
+        rules_text = join_continuations(fh.read())
     expect = [str(s) for s in args.expect_sid] or alerting_sids(rules_text)
     if args.runner == "docker":
         report = run_docker(args, rules_text, expect)
@@ -848,12 +881,17 @@ def cmd_test(args):
 
 def mark_rule_errors(report):
     """Add rule_errors and loaded to each result, and list the engines that
-    rejected the rules (not_loaded) and the ones whose job didn't finish
-    (not_run: timed out, interrupted or crashed; nothing is known about them)."""
+    rejected the rules (not_loaded) and the ones that didn't run the pcap
+    (not_run: timed out, interrupted, crashed, or the engine stopped on an
+    error such as a bad config; nothing is known about them)."""
     for result in report["results"]:
         lines = [x.strip() for x in (result.get("errors") or "").splitlines()]
         result["rule_errors"] = [x for x in lines if RULE_ERROR_RE.search(x)]
-        result["loaded"] = result.get("status") == "done" and not result["rule_errors"]
+        result["loaded"] = (
+            result.get("status") == "done"
+            and result.get("read_pcap", True)
+            and not result["rule_errors"]
+        )
     name = lambda r: r["tech"] or r.get("image")  # noqa: E731
     report["not_loaded"] = [name(r) for r in report["results"] if r["rule_errors"]]
     report["not_run"] = [

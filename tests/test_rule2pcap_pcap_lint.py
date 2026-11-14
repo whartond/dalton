@@ -2,6 +2,7 @@ import itertools
 import json
 
 from scapy.layers.inet import IP, TCP, UDP
+from scapy.layers.inet6 import IPv6
 from scapy.layers.l2 import Ether
 from scapy.packet import Raw
 from scapy.utils import wrpcap
@@ -178,3 +179,17 @@ def test_frames_listing(tmp_path, capsys):
     assert pl.main([path, "--frames"]) == 0
     lines = capsys.readouterr().out.splitlines()
     assert len(lines) == len(rows) and json.loads(lines[0])["frame"] == 1
+
+
+def test_mixed_ipv4_and_ipv6_addresses(tmp_path):
+    # public addresses of both versions used to crash the sort
+    def dns(ip):
+        return Ether(src=CMAC, dst=SMAC) / ip / UDP(sport=5353, dport=53) / Raw(b"x")
+
+    pkts = [
+        dns(IP(src="198.18.0.1", dst="9.9.9.9")),
+        dns(IPv6(src="2001:4860::1", dst="2606:4700::1")),
+    ]
+    result = pl.lint(write(tmp_path, stamp(pkts)))
+    assert "public-address" in codes(result)
+    assert result["summary"]["addresses"]["public"][-1] == "2606:4700::1"
