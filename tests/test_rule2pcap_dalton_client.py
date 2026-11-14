@@ -109,6 +109,13 @@ class FakeDalton:
                         "203.0.113.5:80 -> 10.0.0.5:49152\n"
                     )
                     ids = "Suricata version 8.0.6 RELEASE\n"
+                    if state.mode == "requires-old" and tech == "suricata/7.0.17":
+                        # Suricata 7 skips a rule whose requires: it doesn't meet
+                        ids += (
+                            "Info: detect: Skipping signature due to missing "
+                            "requirements: alert ... sid:1000001; rev:1;) from file "
+                            "/x.rules at line 1\n"
+                        )
                     if state.mode == "warning":
                         # a warning about a valid rule is not a rule error
                         ids += (
@@ -602,7 +609,8 @@ def test_warning_about_a_valid_rule_still_passes(dalton, files, capsys):
     "line",
     [
         "Notice: pcap: read 1 file, 3 packets, 300 bytes",  # 7 and later
-        "<Notice> - Pcap-file module read 1 files, 3 packets, 300 bytes",  # 5, 6
+        "<Notice> - Pcap-file module read 1 files, 3 packets, 300 bytes",  # 4.1-6
+        "<Notice> - Pcap-file module read 4 packets, 1234 bytes",  # 4.0 and older
     ],
 )
 def test_pcap_read_line_across_versions(line):
@@ -623,3 +631,49 @@ def test_apply_sets_list_index():
     assert "- eve-log:\n    enabled: 'no'" in out and "enabled: true" in out
     with pytest.raises(dc.DaltonError, match="no item 5"):
         dc.apply_sets(conf, ["outputs.5.x=1"])
+
+
+def test_rule_skipped_for_requires_is_not_loaded(dalton, files, capsys):
+    pcap, rules = files
+    dalton.mode = "requires-old"
+    code, report = run(
+        capsys,
+        ["test", "--url", dalton.url, "--pcap", str(pcap), "--rules", str(rules)],
+    )
+    # judged on 8.0.6 only; 7.0.17 needs a newer engine, not better traffic
+    assert code == 0 and report["pass"] is True
+    assert report["not_loaded"] == ["suricata/7.0.17"]
+    code, report = run(capsys, ["validate", "--url", dalton.url, "--rules", str(rules)])
+    assert code == 0 and report["valid"] is True
+    assert report["needs_newer_engine"] is True
+
+
+def test_docker_runner_strips_rule_indentation(files, capsys, tmp_path, monkeypatch):
+    pcap, _ = files
+    rules = tmp_path / "indented.rules"
+    rules.write_text('  alert tcp any any -> any any (msg:"x"; sid:1000001;)\n')
+    sent = []
+
+    def fake_run(cmd, **kwargs):
+        rules_file = next(
+            v.split(":")[0] for v in cmd if str(v).endswith(":/rules/test.rules:ro")
+        )
+        sent.append(open(rules_file).read())
+        return subprocess.CompletedProcess(cmd, 0, "i: pcap: read 1 file\n", "")
+
+    monkeypatch.setattr(dc.subprocess, "run", fake_run)
+    run(
+        capsys,
+        [
+            "test",
+            "--runner",
+            "docker",
+            "--image",
+            "suricata-current:latest",
+            "--pcap",
+            str(pcap),
+            "--rules",
+            str(rules),
+        ],
+    )
+    assert sent == ['alert tcp any any -> any any (msg:"x"; sid:1000001;)\n']

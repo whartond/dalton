@@ -683,11 +683,15 @@ def tls_flights(
                     pass
         pump(c_out, s_in, ">")
         pump(s_out, c_in, "<")
+    # either side may be empty: a beacon with no reply, or a server that
+    # speaks first
     for request, response in exchanges:
-        cli.write(request)
-        pump(c_out, s_in, ">")
-        srv.read(1 << 20)
-        srv.write(response)
-        pump(s_out, c_in, "<")
-        cli.read(1 << 20)
+        if request:
+            cli.write(request)
+            pump(c_out, s_in, ">")
+            srv.read(1 << 20)
+        if response:
+            srv.write(response)
+            pump(s_out, c_in, "<")
+            cli.read(1 << 20)
     return flights

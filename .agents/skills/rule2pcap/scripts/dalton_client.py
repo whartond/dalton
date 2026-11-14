@@ -473,7 +473,7 @@ def job_errors(client, jid, ids=None):
     extra = [
         line.strip()
         for line in ids.splitlines()
-        if RULE_ERROR_RE.search(line) and line.strip() not in seen
+        if is_rule_problem(line) and line.strip() not in seen
     ]
     return "\n".join([errors] + extra).strip()
 
@@ -524,7 +524,8 @@ def docker_command(
     pcap_abs, rules_abs = os.path.abspath(pcap), os.path.abspath(rules_file)
     pcap_in = f"/in/{os.path.basename(pcap_abs)}"
     engine_cmd = ["timeout", str(int(timeout))] if timeout else []
-    engine_cmd += ["suricata", "-k", "none", "--runmode", "single"]
+    # -v for the Info lines, e.g. a rule skipped for an unmet requires:
+    engine_cmd += ["suricata", "-k", "none", "-v", "--runmode", "single"]
     engine_cmd += ["-S", "/rules/test.rules", "-r", pcap_in, "-l", "/out"]
     for item in sets or []:
         engine_cmd += ["--set", item]
@@ -613,7 +614,9 @@ def run_docker(args, rules_text, expect):
             "commands": [shlex.join(cmd) for _, _, _, cmd in plans],
         }
     with open(rules_file, "w", encoding="utf-8") as fh:
-        fh.write(rules_text)
+        # Suricata reads an indented line as a comment; Dalton strips the
+        # indent, so do the same
+        fh.write("\n".join(line.lstrip() for line in rules_text.splitlines()) + "\n")
     results = []
     try:
         for image, log_dir, name, cmd in plans:
@@ -643,6 +646,7 @@ def run_docker(args, rules_text, expect):
                 line
                 for line in output.splitlines()
                 if re.search(r"(^|[\s\]])(Error|E):|\berror\b|^docker:", line)
+                or SKIPPED_RE.search(line)
             )
             results.append(
                 {
@@ -769,8 +773,18 @@ RULE_ERROR_RE = re.compile(
     r"(?:(?<![\w-])(?:Error|E):|<Error>).*(?:signature|rule|keyword)"
 )
 # Suricata's last word on a pcap run, logged at its default verbosity:
-# "pcap: read 1 file, ..." (7+) or "Pcap-file module read 1 files, ..." (6 and older)
-PCAP_READ_RE = re.compile(r"\bpcap: read \d+ file|Pcap-file module read \d+ file")
+# "pcap: read 1 file, ..." (7+), "Pcap-file module read 1 files, ..." (4.1 to 6)
+# or "Pcap-file module read 4 packets, ..." (4.0 and older)
+PCAP_READ_RE = re.compile(
+    r"\bpcap: read \d+ file|Pcap-file module read \d+ (?:file|packet)"
+)
+# A rule whose requires: isn't met is skipped, logged only at Info level
+SKIPPED_RE = re.compile(r"Skipping signature due to missing requirements")
+
+
+def is_rule_problem(line):
+    """A rule the engine rejected (an error) or skipped (unmet requires:)."""
+    return bool(RULE_ERROR_RE.search(line) or SKIPPED_RE.search(line))
 
 
 def cmd_validate(args):
@@ -807,9 +821,14 @@ def cmd_validate(args):
     # Version gap: an engine fails only because it lacks keywords that
     # another engine accepts (e.g. Suricata 8 additions on Suricata 7).
     def version_gap(r):
-        if not r["unknown_keywords"] or not loaded:
+        unmet = [x for x in r["rule_errors"] if SKIPPED_RE.search(x)]
+        if not (r["unknown_keywords"] or unmet) or not loaded:
             return False
-        parse_lines = [x for x in r["rule_errors"] if "unknown rule keyword" not in x]
+        parse_lines = [
+            x
+            for x in r["rule_errors"]
+            if "unknown rule keyword" not in x and not SKIPPED_RE.search(x)
+        ]
         return all("error parsing signature" in x for x in parse_lines)
 
     report["loaded_on"] = [r["tech"] or r.get("image") for r in loaded]
@@ -901,7 +920,7 @@ def mark_rule_errors(report):
     error such as a bad config; nothing is known about them)."""
     for result in report["results"]:
         lines = [x.strip() for x in (result.get("errors") or "").splitlines()]
-        result["rule_errors"] = [x for x in lines if RULE_ERROR_RE.search(x)]
+        result["rule_errors"] = [x for x in lines if is_rule_problem(x)]
         result["loaded"] = (
             result.get("status") == "done"
             and result.get("read_pcap", True)

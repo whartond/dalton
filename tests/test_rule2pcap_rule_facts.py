@@ -301,3 +301,11 @@ def test_bare_count_does_not_crash():
 def test_continuation_with_trailing_whitespace_is_parsed():
     result = facts('alert tcp any any -> any any (msg:"x"; \\  \n  sid:7;)\n')
     assert result["rules"][0]["sid"] == 7
+
+
+def test_requires_note():
+    rule = one_rule(
+        'alert tcp any any -> any any (msg:"x"; requires: version >= 8; '
+        'content:"a"; sid:1;)'
+    )
+    assert "requires" in codes(rule["notes"])

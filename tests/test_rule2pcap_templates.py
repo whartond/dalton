@@ -170,3 +170,20 @@ def test_mint_chain_writes_leaf_then_intermediate(tmp_path):
     assert leaf.issuer == ca.subject
     assert "ZeroSSL" in leaf.issuer.rfc4514_string()
     assert leaf.serial_number == 22 and ca.serial_number == 11
+
+
+@pytest.mark.parametrize("tls", ["TLSv1_2", "TLSv1_3"])
+@pytest.mark.parametrize(
+    "exchanges", [[(b"beacon", b"")], [(b"", b"hello")], [(b"a", b"b"), (b"", b"c")]]
+)
+def test_tls_flights_with_an_empty_side(tmp_path, tls, exchanges):
+    import datetime
+
+    pk = pcapkit()
+    when = datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc)
+    cert, key = str(tmp_path / "c.pem"), str(tmp_path / "k.pem")
+    pk.mint_cert([("CN", "a.example")], when, 30, 1, cert, key)
+    flights = pk.tls_flights(
+        cert, key, exchanges, str(tmp_path / "keys.log"), max_version=tls
+    )
+    assert flights and {d for d, _ in flights} == {">", "<"}

@@ -538,7 +538,8 @@ def add_notes(facts):
     for kind in ("threshold", "detection_filter"):
         spec = facts[kind]
         if spec:
-            count = str(spec.get("count", "?"))
+            count = spec.get("count")
+            count = count if isinstance(count, str) else "?"  # a bare count is True
             if kind == "detection_filter":
                 # alerts start once the count is exceeded
                 need = f"{int(count) + 1}" if count.isdigit() else f"{count} + 1"
@@ -647,6 +648,15 @@ def add_notes(facts):
                 "min-version",
                 f"needs Suricata 8 or later ({', '.join(newer)}); Suricata 7 "
                 "won't load it, and test lists such engines in not_loaded",
+            )
+        )
+    for spec in facts["other_keywords"].get("requires", []):
+        notes.append(
+            note(
+                "info",
+                "requires",
+                f"requires: {spec}. An engine that doesn't meet it skips the "
+                "rule, and test lists it in not_loaded",
             )
         )
     if not any(
