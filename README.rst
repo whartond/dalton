@@ -326,6 +326,12 @@ the ``suricatasc`` module was not Python 3 compatible until Suricata
 
       | `Alert metadata not present in EVE output when using Socket Control Pcap Processing Mode <https://redmine.openinfosecfoundation.org/issues/3467>`__
 
+      | `pcap-file mode keeps threshold state across pcaps <https://redmine.openinfosecfoundation.org/issues/8603>`__
+        (Suricata 8; 7.0.17 is not affected). Threshold counts carry over
+        from earlier jobs on the agent, so a ``threshold`` rule can alert on
+        different packets, or a different number of times, depending on
+        which jobs ran before it.
+
 Job Settings
 ------------
 
@@ -487,6 +493,18 @@ ability to edit the configuration file(s) for the sensor:
 If the ``Override EXTERNAL_NET (set to 'any')`` option is selected
 (on by default), then the ``EXTERNAL_NET`` IP variable will be set to
 ``any`` when the job is submitted.
+
+Without Socket Control, the agent runs Suricata in its default ``autofp``
+runmode, which spreads flows across several threads. If whether or where a
+rule alerts depends on the order in which packets from different flows are
+inspected, as with ``threshold`` rules, the alerts can land
+on different flows from one run of the same job to the next. For repeatable
+results, uncomment ``runmode`` in the configuration file and set it to
+``single``::
+
+    runmode: single
+
+Socket Control jobs already run Suricata single-threaded.
 
 See also `Updating Sensor Configs <#updating-sensor-configs>`__. 
 
