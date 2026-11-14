@@ -189,7 +189,9 @@ traffic no real instance would produce.
 
    For a threshold or detection_filter rule, send count + 1 matching
    events, inside the window, from the tracked address. Optionally build a
-   count − 1 variant to show it doesn't fire below the threshold.
+   count − 1 variant to show it doesn't fire below the threshold. Test it
+   with `--set runmode=single`, or the alert lands on a different packet
+   each run.
 2. **Pick a template**, copying it to `$OUT/build.py` along with
    `$SKILL/templates/pcapkit.py`:
    - `build_flowsynth.py`: HTTP, DNS, SMTP and most TCP/UDP application

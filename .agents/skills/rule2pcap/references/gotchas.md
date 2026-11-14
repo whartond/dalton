@@ -91,13 +91,15 @@ Check this list before changing the traffic.
 
 - **Dalton jobs run Suricata multi-threaded** (the default autofp runmode)
   unless socket control is used. Threshold alerts then land on different
-  packets from run to run. Judge threshold rules by whether they fire.
-- **Socket-control jobs (`--socket-control`) are single-threaded, but the
-  agent's long-running Suricata keeps per-host threshold counters between
-  jobs.** Results drift with what ran before.
-- **For exact alert placement or counts, use the docker runner.** It starts
-  a fresh process with `--runmode single`. Ask the user first, as the skill
-  says.
+  packets from run to run. For repeatable placement, test with
+  `--set runmode=single`.
+- **On Suricata 8, socket-control jobs (`--socket-control`) keep per-host
+  threshold counters between jobs** in the agent's long-running Suricata
+  ([Suricata #8603](https://redmine.openinfosecfoundation.org/issues/8603);
+  7.0.17 starts each pcap fresh). Results drift with what ran before, so
+  don't use socket control for threshold rules.
+- **The docker runner** starts a fresh process with `--runmode single`. Ask
+  the user first, as the skill says.
 - **Test every engine version that's online.** Keyword support and buffer
   behaviour differ between major versions. Report each version's result
   separately.
