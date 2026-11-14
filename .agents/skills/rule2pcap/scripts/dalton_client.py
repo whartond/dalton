@@ -295,11 +295,19 @@ def apply_sets(conf_text, sets):
         node = config
         parts = key.split(".")
         for part in parts[:-1]:
+            if isinstance(node, list):
+                # a list index, as in outputs.1.eve-log.enabled
+                if not part.isdigit() or int(part) >= len(node):
+                    raise DaltonError(f"--set {key}: no item {part} in the list")
+                node = node[int(part)]
+                continue
             if part not in node or node[part] is None:
                 node[part] = {}
             node = node[part]
-            if not hasattr(node, "keys"):
+            if not hasattr(node, "keys") and not isinstance(node, list):
                 raise DaltonError(f"--set {key}: '{part}' is not a mapping")
+        if isinstance(node, list):
+            raise DaltonError(f"--set {key}: can't set a list item")
         node[parts[-1]] = value
     out = io.StringIO()
     yaml.dump(config, out)
@@ -369,7 +377,7 @@ def alert_lines(fast_text, limit=20):
 def join_continuations(text):
     """Join rule lines ending in a backslash, as Suricata does. Dalton checks
     each line on its own, so a continued rule has to be sent joined."""
-    return re.sub(r"\\\r?\n", "", text)
+    return re.sub(r"\\[ \t]*\r?\n", "", text)
 
 
 def alerting_sids(rules_text):
@@ -581,7 +589,8 @@ def run_docker(args, rules_text, expect):
     else:
         base = keep or tempfile.mkdtemp(prefix="rule2pcap-")
         os.makedirs(base, exist_ok=True)
-    rules_file = os.path.join(base, "test.rules")
+    # not test.rules: --keep-logs . in the output directory must not overwrite it
+    rules_file = os.path.join(base, "rules-run.rules")
     plans = []
     for image in images:
         log_dir = os.path.join(base, re.sub(r"[^A-Za-z0-9_.-]", "_", image))
@@ -752,10 +761,16 @@ def tiny_pcap(path):
 
 
 # A rejected rule always logs "error parsing signature" (plus the reason, e.g.
-# "unknown rule keyword"); config errors such as "Failed to parse" aren't rule errors
-RULE_ERROR_RE = re.compile(r"(Error|E):.*(signature|rule|keyword)", re.I)
-# Suricata's last word on a pcap run, logged at its default verbosity
-PCAP_READ_RE = re.compile(r"\bpcap: read \d+ file")
+# "unknown rule keyword"); config errors such as "Failed to parse" aren't rule
+# errors. The level must be an error: "Error:" or "E:" (Suricata 7+, long and
+# short formats) or "<Error>" (6 and older), not a warning such as
+# "Warning: detect-classtype: signature ... uses unknown classtype".
+RULE_ERROR_RE = re.compile(
+    r"(?:(?<![\w-])(?:Error|E):|<Error>).*(?:signature|rule|keyword)"
+)
+# Suricata's last word on a pcap run, logged at its default verbosity:
+# "pcap: read 1 file, ..." (7+) or "Pcap-file module read 1 files, ..." (6 and older)
+PCAP_READ_RE = re.compile(r"\bpcap: read \d+ file|Pcap-file module read \d+ file")
 
 
 def cmd_validate(args):

@@ -37,7 +37,7 @@
       "prompt": "Pcap please: alert http $EXTERNAL_NET any -> $HOME_NET any (msg:\"Scripted account registration\"; flow:established,to_server; http.method; content:\"POST\"; http.uri; content:\"/api/register\"; http.request_body; content:\"email=\"; threshold:type both, track by_src, count 5, seconds 300; sid:9100005; rev:1;)",
       "expectations": [
         "At least five qualifying POSTs from one source inside 300 seconds.",
-        "The README doesn't promise which packet the alert lands on."
+        "The test uses --set runmode=single; the README doesn't promise which packet the alert lands on in Dalton's default runmode."
       ]
     },
     {

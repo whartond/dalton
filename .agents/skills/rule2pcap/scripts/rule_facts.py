@@ -225,7 +225,7 @@ REFERENCE_URLS = {
 
 def join_continuations(text):
     """Join lines ending in a backslash, as Suricata does."""
-    return re.sub(r"\\\r?\n", "", text)
+    return re.sub(r"\\[ \t]*\r?\n", "", text)
 
 
 def split_header(header):
@@ -538,7 +538,7 @@ def add_notes(facts):
     for kind in ("threshold", "detection_filter"):
         spec = facts[kind]
         if spec:
-            count = spec.get("count", "?")
+            count = str(spec.get("count", "?"))
             if kind == "detection_filter":
                 # alerts start once the count is exceeded
                 need = f"{int(count) + 1}" if count.isdigit() else f"{count} + 1"

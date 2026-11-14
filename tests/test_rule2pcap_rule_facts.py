@@ -288,3 +288,16 @@ def test_threshold_note_per_type(option, wanted):
 def test_tcp_header_keywords_get_header_fields_note():
     rule = one_rule('alert tcp any any -> any any (msg:"x"; tcp.seq:0; sid:1;)')
     assert "header-fields" in codes(rule["notes"])
+
+
+def test_bare_count_does_not_crash():
+    rule = one_rule(
+        'alert tcp any any -> any any (msg:"x"; content:"a"; '
+        "detection_filter:track by_src, count, seconds 60; sid:1;)"
+    )
+    assert "detection_filter" in codes(rule["notes"])
+
+
+def test_continuation_with_trailing_whitespace_is_parsed():
+    result = facts('alert tcp any any -> any any (msg:"x"; \\  \n  sid:7;)\n')
+    assert result["rules"][0]["sid"] == 7

@@ -109,6 +109,12 @@ class FakeDalton:
                         "203.0.113.5:80 -> 10.0.0.5:49152\n"
                     )
                     ids = "Suricata version 8.0.6 RELEASE\n"
+                    if state.mode == "warning":
+                        # a warning about a valid rule is not a rule error
+                        ids += (
+                            "Warning: detect-classtype: signature sid:1000001 uses "
+                            'unknown classtype: "my-class", using default priority 3.\n'
+                        )
                     if state.mode == "engine-stopped":
                         # e.g. a bad --set: the job is done but no pcap was read
                         error = (
@@ -548,3 +554,72 @@ def test_docker_keep_logs_reuse_starts_clean(files, capsys, tmp_path, monkeypatc
     code, report = run(capsys, argv)
     # the second run's alert only, not the first run's left in the reused directory
     assert code == 1 and list(report["results"][0]["fired"]) == ["2"]
+
+
+@pytest.mark.parametrize(
+    "line, is_error",
+    [
+        ("Error: detect-parse: unknown rule keyword 'depthh'.", True),
+        ('E: detect: error parsing signature "alert ..." from file x at line 1', True),
+        (
+            "[10 - Suricata-Main] 2026-11-14 Error: detect: error parsing signature",
+            True,
+        ),
+        (
+            "<Error> - [ERRCODE: SC_ERR_INVALID_SIGNATURE(39)] - error parsing "
+            'signature "alert ..."',
+            True,
+        ),
+        (
+            "Warning: detect-classtype: signature sid:1 uses unknown classtype: "
+            '"x", using default priority 3.',
+            False,
+        ),
+        (
+            "Warning: detect-filestore: One or more rule(s) depends on the "
+            "file-store output",
+            False,
+        ),
+        ("Notice: detect: 1 rule files processed.", False),
+        ("Error: conf-yaml-loader: Failed to parse configuration file", False),
+    ],
+)
+def test_rule_error_lines(line, is_error):
+    assert bool(dc.RULE_ERROR_RE.search(line)) is is_error
+
+
+def test_warning_about_a_valid_rule_still_passes(dalton, files, capsys):
+    pcap, rules = files
+    dalton.mode = "warning"
+    code, report = run(
+        capsys,
+        ["test", "--url", dalton.url, "--pcap", str(pcap), "--rules", str(rules)],
+    )
+    assert code == 0 and report["pass"] is True and report["not_loaded"] == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Notice: pcap: read 1 file, 3 packets, 300 bytes",  # 7 and later
+        "<Notice> - Pcap-file module read 1 files, 3 packets, 300 bytes",  # 5, 6
+    ],
+)
+def test_pcap_read_line_across_versions(line):
+    assert dc.PCAP_READ_RE.search(line)
+
+
+def test_continuation_with_trailing_whitespace():
+    text = 'alert tcp any any -> any any (msg:"x"; \\  \n  sid:1;)\n'
+    assert dc.join_continuations(text) == (
+        'alert tcp any any -> any any (msg:"x";   sid:1;)\n'
+    )
+    assert dc.alerting_sids(text) == ["1"]
+
+
+def test_apply_sets_list_index():
+    conf = "%YAML 1.1\n---\noutputs:\n  - fast:\n      enabled: yes\n  - eve-log:\n      enabled: yes\n"
+    out = dc.apply_sets(conf, ["outputs.1.eve-log.enabled=no"])
+    assert "- eve-log:\n    enabled: 'no'" in out and "enabled: true" in out
+    with pytest.raises(dc.DaltonError, match="no item 5"):
+        dc.apply_sets(conf, ["outputs.5.x=1"])
