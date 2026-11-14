@@ -73,7 +73,11 @@ class FakeDalton:
                 elif path.startswith("/dalton/controller_api/request_engine_conf"):
                     self.reply(200, CONF.replace("\n", "\r\n"))
                 elif path.startswith("/dalton/controller_api/job_status_code/"):
-                    self.reply(200, "2")
+                    jid = path.rstrip("/").split("/")[-1]
+                    timed_out = state.mode == "timeout-old" and (
+                        state.job_tech.get(jid) == "suricata/7.0.17"
+                    )
+                    self.reply(200, "4" if timed_out else "2")
                 elif path.startswith("/dalton/controller_api/v2/"):
                     parts = path.rstrip("/").split("/")
                     key, jid = parts[-1], parts[-2]
@@ -92,7 +96,16 @@ class FakeDalton:
                         "[Classification: (null)] [Priority: 3] {TCP} "
                         "203.0.113.5:80 -> 10.0.0.5:49152\n"
                     )
-                    data = {"eve": EVE, "alert": fast, "error": error}.get(key)
+                    ids = "Suricata version 8.0.6 RELEASE\n"
+                    if state.mode == "ids-only-error":
+                        # Suricata's own format, which the agent's error filter misses
+                        ids += (
+                            "E: detect-parse: unknown rule keyword 'depthh'.\n"
+                            'E: detect: error parsing signature "alert ..." at line 1\n'
+                        )
+                    data = {"eve": EVE, "alert": fast, "error": error, "ids": ids}.get(
+                        key
+                    )
                     body = {"error": data is None, "error_msg": None, "data": data}
                     self.reply(200, json.dumps(body), "application/json")
                 else:
@@ -326,9 +339,14 @@ def test_docker_dry_run_prints_commands_and_runs_nothing(files, capsys, tmp_path
     )
     assert code == 0 and report["dry_run"] is True
     (cmd,) = report["commands"]
-    assert cmd.startswith("docker run --rm --network none ")
+    assert cmd.startswith("docker run --rm --name rule2pcap-")
+    assert " --network none " in cmd
+    # nothing was created: the paths are placeholders for a real run's temp dir
+    assert "rule2pcap-XXXXXXXX" in cmd and "rule2pcap-XXXXXXXX" in report["note"]
     assert f"{pcap}:/in/x.pcap:ro" in cmd
     assert "--runmode single" in cmd and "--set stream.inline=true" in cmd
+    # the time limit is enforced inside the container, so it always ends normally
+    assert "timeout 600 suricata -k none" in cmd
     if hasattr(os, "getuid"):
         assert f"chown -R {os.getuid()}:{os.getgid()} /out" in cmd
 
@@ -396,3 +414,37 @@ def test_older_engine_missing_a_keyword_is_a_version_gap(dalton, files, capsys):
 def test_preflight_lists_the_engines_test_will_use(dalton, capsys):
     _, report = run(capsys, ["preflight", "--url", dalton.url])
     assert report["dalton"]["engines"] == ["suricata/8.0.6", "suricata/7.0.17"]
+
+
+def test_validate_finds_errors_only_in_engine_output(dalton, files, capsys):
+    _, rules = files
+    dalton.mode = "ids-only-error"
+    code, report = run(capsys, ["validate", "--url", dalton.url, "--rules", str(rules)])
+    assert code == 1 and report["valid"] is False
+    for result in report["results"]:
+        assert result["unknown_keywords"] == ["depthh"]
+        assert result["rule_errors"][0].startswith("E: detect-parse")
+
+
+def test_unfinished_job_is_not_run_and_fails(dalton, files, capsys):
+    pcap, rules = files
+    dalton.mode = "timeout-old"
+    code, report = run(
+        capsys,
+        ["test", "--url", dalton.url, "--pcap", str(pcap), "--rules", str(rules)],
+    )
+    assert code == 2 and report["pass"] is False
+    assert report["not_run"] == ["suricata/7.0.17"] and report["not_loaded"] == []
+
+
+def test_nothing_to_check_fails(dalton, files, capsys, tmp_path):
+    pcap, _ = files
+    rules = tmp_path / "noalert.rules"
+    rules.write_text(
+        'alert tcp any any -> any any (msg:"set"; flowbits:set,x; noalert; sid:5;)\n'
+    )
+    code, report = run(
+        capsys,
+        ["test", "--url", dalton.url, "--pcap", str(pcap), "--rules", str(rules)],
+    )
+    assert code == 1 and report["pass"] is False and "no sids" in report["error"]

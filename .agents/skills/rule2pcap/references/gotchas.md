@@ -101,9 +101,11 @@ Check this list before changing the traffic.
 - **Test every engine version that's online.** Keyword support and buffer
   behaviour differ between major versions. Report each version's result
   separately.
-- **Read the anomaly counts in the test output.** Unexpected `stream:` or
-  `applayer:` anomalies usually mean the traffic is malformed, even when
-  the rule fires. These are known to appear on genuine traffic and can be
+- **Read the anomaly counts in the test output.** Unexpected `applayer:`
+  anomalies usually mean the traffic is malformed, even when the rule
+  fires. `stream:` anomalies would too, but Dalton's stock configs don't
+  log them, so a clean result doesn't prove the TCP is right: run
+  `pcap_lint.py` as well. These are known to appear on genuine traffic and can be
   accepted without changing the build:
   - `applayer:APPLAYER_DETECT_PROTOCOL_ONLY_ONE_DIRECTION` on SMTP in
     Suricata 7, and on SSLv2 sessions;

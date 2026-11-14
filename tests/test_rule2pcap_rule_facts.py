@@ -214,3 +214,55 @@ def test_roles_basis_echoes_the_rules_keyword():
         'alert tls any any -> any any (flow:established,from_server; content:"x"; sid:4;)'
     )["rules"][0]
     assert rule["roles"]["basis"] == "flow from_server"
+
+
+def one_rule(text):
+    return facts(text)["rules"][0]
+
+
+@pytest.mark.parametrize(
+    "option, buffer",
+    [
+        ("http_request_line", "http_request_line"),
+        ("http.request_line", "http.request_line"),
+        ("http_accept", "http_accept"),
+        ("http_header_names", "http_header_names"),
+    ],
+)
+def test_underscore_sticky_buffers(option, buffer):
+    rule = one_rule(
+        f'alert http any any -> any any (msg:"x"; flow:established,to_server; '
+        f'{option}; content:"GET /x"; sid:1;)'
+    )
+    assert rule["contents"][0]["buffer"] == buffer
+
+
+def test_header_buffer_gets_header_fields_note():
+    rule = one_rule(
+        'alert tcp any any -> any any (msg:"x"; tcp.hdr; content:"|50 18|"; sid:1;)'
+    )
+    assert rule["contents"][0]["buffer"] == "tcp.hdr"
+    assert "header-fields" in codes(rule["notes"])
+
+
+def test_tls_store_is_not_a_buffer():
+    rule = one_rule(
+        'alert tls any any -> any any (msg:"x"; flow:established,to_client; '
+        'tls.cert_subject; content:"CN=x"; tls.store; sid:1;)'
+    )
+    assert rule["buffers"] == ["tls.cert_subject"]
+
+
+def test_non_numeric_sid():
+    rule = one_rule(
+        'alert tcp any any -> any any (msg:"x"; content:"a"; sid:../../tmp/x;)'
+    )
+    assert "sid" in codes(rule["notes"])
+    assert rule["suggested_dir"].startswith("nosid-")
+
+
+def test_standalone_noalert_note():
+    rule = one_rule(
+        'alert tcp any any -> any any (msg:"x"; content:"a"; noalert; sid:1;)'
+    )
+    assert "noalert" in codes(rule["notes"])

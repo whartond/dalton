@@ -36,7 +36,8 @@ Set these once, as absolute paths, and use them in every command:
   characters. If the user names another location, use that.
 
 Run commands from `$OUT` once it exists. Every script prints JSON. Keep raw
-script output, such as test results, in `$WORK/logs/`, not in `$OUT`.
+script output, such as test results, in `$WORK/rule2pcap-output/logs/`
+(create it first), not in `$OUT`.
 
 Deliverable, in `$OUT`:
 - the pcap;
@@ -110,8 +111,9 @@ exploit or malware, say once that a pcap built from the rule begs the
 question; a capture of the real traffic is the test for that. This pcap
 checks the rule's syntax and structure. Then carry on if they still want it.
 
-Save the rules to `$WORK/test.rules`, then run `rule_facts.py` (step 2) to
-get `suggested_dir`. Create `$OUT`, and move `test.rules` into it.
+Save the rules to `$WORK/rule2pcap-output/test.rules`, then run
+`rule_facts.py` (step 2) to get `suggested_dir`. Create `$OUT`, and move
+`test.rules` into it.
 
 ## 2. Read the rule
 
@@ -138,7 +140,8 @@ get `suggested_dir`. Create `$OUT`, and move `test.rules` into it.
    - `valid: true` with `needs_newer_engine: true` means older engines
      lack a keyword (`unknown_keywords`). That's a version requirement,
      not an error.
-   - `valid: false` means a real syntax problem.
+   - `valid: false` means a real syntax problem, unless `not_run` lists an
+     engine: its job didn't finish (exit code 2), so run it again.
 3. **Tell the user about any error-level notes and every real syntax
    error.** Don't rewrite the rule silently. Small obvious typos are worth
    pointing out. Don't try to be clever about style.
@@ -210,7 +213,7 @@ traffic no real instance would produce.
 
 ```
 $VENV/bin/python $SKILL/scripts/pcap_lint.py <name>.pcap
-$VENV/bin/python $SKILL/scripts/dalton_client.py test --pcap <name>.pcap --rules test.rules > $WORK/logs/<name>-test.json
+$VENV/bin/python $SKILL/scripts/dalton_client.py test --pcap <name>.pcap --rules test.rules > $WORK/rule2pcap-output/logs/<name>-test.json
 ```
 
 - **Lint:** fix every lint error. Fix or justify every warning, and note
@@ -228,9 +231,14 @@ $VENV/bin/python $SKILL/scripts/dalton_client.py test --pcap <name>.pcap --rules
   older versions without a keyword the rule uses. Their `expected_fired`
   is null and they don't count against the pass. Report them as "needs
   Suricata N or later", not as failures.
-- **Anomalies:** read `anomalies` in the test output. Unexpected `stream:`
-  or `applayer:` events usually mean malformed traffic, even when the rule
-  fires. A few are normal for some protocols on some versions;
+- **Engines that didn't run:** `not_run` lists jobs that timed out, were
+  interrupted or crashed. Nothing is known about them, so the test fails
+  with exit code 2. Run it again, perhaps with a longer `--timeout`; if it
+  keeps happening, tell the user.
+- **Anomalies:** read `anomalies` in the test output. Unexpected
+  `applayer:` events (and `stream:` events, on configs that log them;
+  Dalton's stock configs don't) usually mean malformed traffic, even when
+  the rule fires. A few are normal for some protocols on some versions;
   `references/gotchas.md` lists the known ones.
 - **Engine settings:** use `--set key=value` only when the rule needs it
   (e.g. `stream.inline=true`), and report it.

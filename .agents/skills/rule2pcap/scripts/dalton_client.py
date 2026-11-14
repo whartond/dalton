@@ -182,9 +182,7 @@ class Dalton:
     def engine_conf(self, tech):
         query = urllib.parse.urlencode({"sensor": tech})
         text = self.get_text(f"/dalton/controller_api/request_engine_conf?{query}")
-        if text.lstrip().startswith("# No suitable") or text.lstrip().startswith(
-            "# Unable"
-        ):
+        if text.lstrip().startswith(("# No suitable", "# Unable", "# Exception")):
             raise DaltonError(f"Dalton has no engine config for {tech}: {text.strip()}")
         return text.replace("\r\n", "\n")
 
@@ -435,10 +433,24 @@ def run_dalton(args, rules_text, expect):
                 alert_lines=alert_lines(fast),
                 anomalies=anomalies,
                 expected_fired=verdict(fired, expect),
-                errors=(client.job_data(jid, "error") or "").strip()[-4000:],
+                errors=job_errors(client, jid)[-4000:],
             )
         results.append(result)
     return {"runner": "dalton", "url": client.url, "results": results}
+
+
+def job_errors(client, jid):
+    """The job's error lines: Dalton's error tab, plus rule errors from the
+    engine's full output. The agent's error filter only knows some engine log
+    formats (e.g. "Error: ..." but not Suricata's "E: ...")."""
+    errors = (client.job_data(jid, "error") or "").strip()
+    seen = {line.strip() for line in errors.splitlines()}
+    extra = [
+        line.strip()
+        for line in (client.job_data(jid, "ids") or "").splitlines()
+        if RULE_ERROR_RE.search(line) and line.strip() not in seen
+    ]
+    return "\n".join([errors] + extra).strip()
 
 
 def client_from_env(args):
@@ -469,18 +481,25 @@ def docker_images(engine="suricata"):
     return sorted({i for i in out.split() if pattern.search(i) and "<none>" not in i})
 
 
-def docker_command(image, pcap, rules_file, log_dir, sets, engine="suricata"):
+DOCKER_SLACK = 120  # seconds for docker to create, start and remove a container
+
+
+def docker_command(
+    image, pcap, rules_file, log_dir, sets, engine="suricata", name=None, timeout=None
+):
     """The docker command that runs one engine image over the pcap.
 
     The engine runs as the image's own user (its config is not readable by
     others), then hands the log files back to the caller's uid so they can
-    be read and deleted without root.
+    be read and deleted without root. With a timeout, the engine is stopped
+    inside the container (exit code 124), so the container ends normally.
     """
     if engine != "suricata":
         raise DaltonError(f"the docker runner does not support {engine} yet")
     pcap_abs, rules_abs = os.path.abspath(pcap), os.path.abspath(rules_file)
     pcap_in = f"/in/{os.path.basename(pcap_abs)}"
-    engine_cmd = ["suricata", "-k", "none", "--runmode", "single"]
+    engine_cmd = ["timeout", str(int(timeout))] if timeout else []
+    engine_cmd += ["suricata", "-k", "none", "--runmode", "single"]
     engine_cmd += ["-S", "/rules/test.rules", "-r", pcap_in, "-l", "/out"]
     for item in sets or []:
         engine_cmd += ["--set", item]
@@ -493,6 +512,7 @@ def docker_command(image, pcap, rules_file, log_dir, sets, engine="suricata"):
         "docker",
         "run",
         "--rm",
+        *(["--name", name] if name else []),
         "--network",
         "none",
         "-v",
@@ -509,41 +529,75 @@ def docker_command(image, pcap, rules_file, log_dir, sets, engine="suricata"):
     ]
 
 
+def remove_container(name, attempts=60):
+    """Remove a container whose docker client was killed. The daemon may
+    still be creating it, so keep trying until it's gone."""
+    for _ in range(attempts):
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=60)
+        listed = subprocess.run(
+            ["docker", "ps", "-aq", "--filter", f"name=^{name}$"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        ).stdout.strip()
+        if not listed:
+            return
+        time.sleep(1)
+
+
 def run_docker(args, rules_text, expect):
     images = args.image or docker_images(args.engine) or []
     if not images:
         raise DaltonError(f"no local {args.engine} images found; pass --image")
     keep = args.keep_logs
-    base = keep or tempfile.mkdtemp(prefix="rule2pcap-")
-    os.makedirs(base, exist_ok=True)
+    if args.dry_run:
+        # nothing is created; a real run puts the rules and logs in a new
+        # temporary directory (or --keep-logs) in place of this placeholder
+        base = keep or os.path.join(tempfile.gettempdir(), "rule2pcap-XXXXXXXX")
+    else:
+        base = keep or tempfile.mkdtemp(prefix="rule2pcap-")
+        os.makedirs(base, exist_ok=True)
     rules_file = os.path.join(base, "test.rules")
-    with open(rules_file, "w", encoding="utf-8") as fh:
-        fh.write(rules_text)
     plans = []
     for image in images:
         log_dir = os.path.join(base, re.sub(r"[^A-Za-z0-9_.-]", "_", image))
-        os.makedirs(log_dir, exist_ok=True)
-        plans.append(
-            (
-                image,
-                log_dir,
-                docker_command(image, args.pcap, rules_file, log_dir, args.set),
-            )
+        name = f"rule2pcap-{uuid.uuid4().hex[:12]}"
+        cmd = docker_command(
+            image,
+            args.pcap,
+            rules_file,
+            log_dir,
+            args.set,
+            name=name,
+            timeout=args.timeout,
         )
+        plans.append((image, log_dir, name, cmd))
     if args.dry_run:
-        if not keep:
-            shutil.rmtree(base, ignore_errors=True)
         return {
             "runner": "docker",
             "dry_run": True,
-            "commands": [shlex.join(cmd) for _, _, cmd in plans],
+            "note": f"{base} stands for the temporary directory a real run creates",
+            "commands": [shlex.join(cmd) for _, _, _, cmd in plans],
         }
+    with open(rules_file, "w", encoding="utf-8") as fh:
+        fh.write(rules_text)
     results = []
     try:
-        for image, log_dir, cmd in plans:
-            proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=args.timeout
-            )
+        for image, log_dir, name, cmd in plans:
+            os.makedirs(log_dir, exist_ok=True)
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=args.timeout + DOCKER_SLACK,
+                )
+            except subprocess.TimeoutExpired:
+                remove_container(name)
+                results.append(
+                    {"image": image, "tech": None, "status": "timeout", "errors": ""}
+                )
+                continue
             output = proc.stdout + proc.stderr
             version = re.search(r"Suricata version (\S+)", output)
             eve = read_file(os.path.join(log_dir, "eve.json"))
@@ -558,7 +612,9 @@ def run_docker(args, rules_text, expect):
                 {
                     "image": image,
                     "tech": f"suricata/{version.group(1)}" if version else None,
-                    "status": "done" if proc.returncode == 0 else "failed",
+                    "status": {0: "done", 124: "timeout"}.get(
+                        proc.returncode, "failed"
+                    ),
                     "exit_code": proc.returncode,
                     "fired": fired,
                     "alert_lines": alert_lines(fast),
@@ -699,7 +755,7 @@ def cmd_validate(args):
                 unknown.append(m.group(1))
         result["unknown_keywords"] = unknown
     loaded = [r for r in report["results"] if r["loaded"]]
-    failed = [r for r in report["results"] if not r["loaded"]]
+    failed = [r for r in report["results"] if r["rule_errors"]]
 
     # Version gap: an engine fails only because it lacks keywords that
     # another engine accepts (e.g. Suricata 8 additions on Suricata 7).
@@ -710,10 +766,15 @@ def cmd_validate(args):
         return all("error parsing signature" in x for x in parse_lines)
 
     report["loaded_on"] = [r["tech"] or r.get("image") for r in loaded]
-    report["not_loaded"] = [r["tech"] or r.get("image") for r in failed]
     report["needs_newer_engine"] = bool(failed) and all(version_gap(r) for r in failed)
-    report["valid"] = bool(loaded) and (not failed or report["needs_newer_engine"])
+    report["valid"] = (
+        bool(loaded)
+        and not report["not_run"]
+        and (not failed or report["needs_newer_engine"])
+    )
     print(json.dumps(report, indent=2))
+    if report["not_run"]:
+        return 2
     return 0 if report["valid"] else 1
 
 
@@ -766,27 +827,38 @@ def cmd_test(args):
     mark_rule_errors(report)
     loaded = [r for r in report["results"] if r["loaded"]]
     # An engine that can't load the rule (e.g. a keyword newer than that
-    # version) says nothing about the pcap. Report it, judge the rest.
-    report["not_loaded"] = [
-        r["tech"] or r.get("image") for r in report["results"] if not r["loaded"]
-    ]
+    # version) says nothing about the pcap. Report it, judge the rest. An
+    # engine whose job didn't finish fails the test: it might not fire.
     for r in report["results"]:
-        if not r["loaded"] and "expected_fired" in r:
-            r["expected_fired"] = None  # couldn't load the rule: nothing to judge
-    report["pass"] = bool(loaded) and all(
-        r.get("status") == "done" and all(r.get("expected_fired", {}).values())
-        for r in loaded
+        if not r["loaded"]:
+            r["expected_fired"] = None  # nothing to judge
+    report["pass"] = (
+        bool(expect)
+        and bool(loaded)
+        and not report["not_run"]
+        and all(all(r["expected_fired"].values()) for r in loaded)
     )
+    if not expect:
+        report["error"] = "no sids to check: every rule is noalert or has no sid"
     print(json.dumps(report, indent=2))
+    if report["not_run"]:
+        return 2
     return 0 if report["pass"] else 1
 
 
 def mark_rule_errors(report):
-    """Add rule_errors and loaded to each result."""
+    """Add rule_errors and loaded to each result, and list the engines that
+    rejected the rules (not_loaded) and the ones whose job didn't finish
+    (not_run: timed out, interrupted or crashed; nothing is known about them)."""
     for result in report["results"]:
         lines = [x.strip() for x in (result.get("errors") or "").splitlines()]
         result["rule_errors"] = [x for x in lines if RULE_ERROR_RE.search(x)]
         result["loaded"] = result.get("status") == "done" and not result["rule_errors"]
+    name = lambda r: r["tech"] or r.get("image")  # noqa: E731
+    report["not_loaded"] = [name(r) for r in report["results"] if r["rule_errors"]]
+    report["not_run"] = [
+        name(r) for r in report["results"] if not r["loaded"] and not r["rule_errors"]
+    ]
 
 
 def build_parser():

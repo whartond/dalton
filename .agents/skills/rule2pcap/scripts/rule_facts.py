@@ -55,7 +55,22 @@ LEGACY_STICKY = {
     "krb5_sname",
     "sip_method",
     "sip_uri",
+    # HTTP sticky buffers with legacy underscore names
+    "http_request_line",
+    "http_response_line",
+    "http_accept",
+    "http_accept_enc",
+    "http_accept_lang",
+    "http_referer",
+    "http_content_type",
+    "http_content_len",
+    "http_header_names",
+    "http_connection",
+    "http_start",
+    "http_protocol",
 }
+# Value-less options with a dot in their name that aren't buffers.
+NOT_BUFFERS = {"tls.store", "tls.cert_expired", "tls.cert_valid"}
 # Old-style modifiers that move the preceding content into a buffer.
 LEGACY_MODIFIERS = {
     "http_uri": "http.uri",
@@ -71,8 +86,6 @@ LEGACY_MODIFIERS = {
     "http_user_agent": "http.user_agent",
     "http_host": "http.host",
     "http_raw_host": "http.host.raw",
-    "http_request_line": "http.request_line",
-    "http_response_line": "http.response_line",
 }
 CONTENT_MODIFIERS = {
     "nocase",
@@ -389,6 +402,9 @@ def analyse(rule):
                 facts[name] = int(value)
             except (TypeError, ValueError):
                 facts[name] = value
+                facts["notes"].append(
+                    note("error", name, f"{name} must be a number, not {value!r}")
+                )
         elif name == "msg":
             facts["msg"] = unquote(value)
         elif name == "classtype":
@@ -432,10 +448,14 @@ def analyse(rule):
         elif name in LEGACY_MODIFIERS and last_content is not None:
             last_content["buffer"] = LEGACY_MODIFIERS[name]
             add_unique(facts["buffers"], LEGACY_MODIFIERS[name])
-        elif value is None and (name in LEGACY_STICKY or "." in name):
+        elif value is None and (
+            name in LEGACY_STICKY or ("." in name and name not in NOT_BUFFERS)
+        ):
             buffer = name
             last_content = None
             add_unique(facts["buffers"], name)
+            if name in HEADER_KEYWORDS:  # tcp.hdr etc.: a buffer of header bytes
+                facts["other_keywords"].setdefault(name, []).append(value)
         elif name in TRANSFORMS:
             facts["transforms"].append(
                 {"buffer": buffer, "transform": name, "value": value}
@@ -498,16 +518,19 @@ def add_notes(facts):
                 "Test with 'alert' if that matters",
             )
         )
-    for fb in facts["flowbits"]:
-        if fb["command"] == "noalert":
-            notes.append(
-                note(
-                    "info",
-                    "noalert",
-                    "rule sets state without alerting: check the eve event's "
-                    "metadata.flowbits, or test a copy with noalert removed",
-                )
+    noalert = "noalert" in facts["other_keywords"] or any(
+        fb["command"] == "noalert" for fb in facts["flowbits"]
+    )
+    if noalert:
+        notes.append(
+            note(
+                "info",
+                "noalert",
+                "rule never alerts: it only sets state for other rules. Check "
+                "the eve event's metadata (e.g. flowbits), or test a copy with "
+                "noalert removed",
             )
+        )
     for kind in ("threshold", "detection_filter"):
         spec = facts[kind]
         if spec:
@@ -726,7 +749,8 @@ def suggested_dir(facts):
     """<sid>-<slug>: msg lowercased, non-alphanumerics to '-', 40 chars max."""
     slug = re.sub(r"[^a-z0-9]+", "-", (facts["msg"] or "rule").lower()).strip("-")
     slug = slug[:40].rstrip("-") or "rule"
-    return f"{facts['sid'] or 'nosid'}-{slug}"
+    sid = facts["sid"] if isinstance(facts["sid"], int) else "nosid"
+    return f"{sid}-{slug}"
 
 
 def roles(facts):
