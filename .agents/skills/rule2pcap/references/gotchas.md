@@ -46,6 +46,17 @@ Check this list before changing the traffic.
   `dns` and the like need the protocol detected, which needs a handshake
   and traffic both ways. Check `app_proto` in the eve alert, or the
   `anomaly` counts in the test output.
+- **HTTP bodies are inspected only up to a limit.** `http.request_body`
+  sees the first `request-body-limit` bytes (100kb in Dalton's 7.0 config
+  and Suricata's default), and `file.data` on responses stops at
+  `response-body-limit`. Content past the limit never matches, and junk
+  padding ahead of a payload is a known evasion. React2Shell scanners pad
+  by 128 KB, which hides the payload from body rules. Keep matched bytes
+  inside the limit. When attack tools pad, build a padded variant, test it
+  with `--expect-absent`, and confirm the cause with
+  `--set app-layer.protocols.http.libhtp.default-config.request-body-limit=256kb`;
+  the write-up then says the rule misses padded requests at the default
+  limit.
 - **libhtp merges duplicate headers.** Two `Location:` headers become one
   value in `http.header`. Match repeats in `http.header.raw`. Expect an
   `applayer:RESPONSE_HEADER_REPETITION` anomaly; it's correct, not a defect.

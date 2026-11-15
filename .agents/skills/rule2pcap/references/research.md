@@ -61,6 +61,13 @@ a public PoC. A rule that misses the observed traffic is the most useful
 thing the write-up can tell its author. Build that variant, test it, and
 put the result under Notes, with the bytes that miss.
 
+For a widely exploited CVE, look past the first PoC to what mass
+exploitation sends: honeypot and threat-intel reports, and the public
+scanners attackers adopt. They often differ from the PoC (other parts,
+fixed boundaries, extra headers), and the write-up should say which one
+the pcap follows. If the dominant tool has evasion options, such as body
+padding, encodings or chunking, try the rule against those too.
+
 ## One source per flow
 
 Keep each flow true to one source. Don't put one tool's or actor's headers
