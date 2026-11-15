@@ -45,6 +45,29 @@ the family, exploit or tool.
 If web access needs approval in your environment, ask for it. If there is
 none, say so and build from the rule and what you already know.
 
+## Read the bytes, not a summary
+
+Fetch tools that summarize a page paraphrase it, drop code blocks, and
+may withhold exploit details outright. When a page carries bytes that
+matter (a request, headers, a payload, a code sample), fetch it raw
+(`curl -sL`) and read its `<pre>` and `<code>` blocks. In the source list,
+mark pages you read only through a summary, as you mark search snippets.
+
+## Test the rule against what was seen
+
+When a source shows attack bytes observed in the wild, check whether the
+rule matches them, even if you build the pcap from another source such as
+a public PoC. A rule that misses the observed traffic is the most useful
+thing the write-up can tell its author. Build that variant, test it, and
+put the result under Notes, with the bytes that miss.
+
+## One source per flow
+
+Keep each flow true to one source. Don't put one tool's or actor's headers
+on another's body, or date a later tool's traffic to an earlier sighting:
+that is a session nobody sent. If you do combine sources, say so in the
+write-up, and don't list the combination as confirmed.
+
 ## When there's nothing to find
 
 For a generic or behavioural rule, there may be nothing to find: empty

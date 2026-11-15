@@ -5,6 +5,10 @@ section. Keep it factual. Say plainly what is confirmed by sources and what
 is invented. The user may hand the pcap to others, who will rely on this
 file.
 
+Read back any escape sequence you wrote into it (` `, `\x0d`): a
+tool call can decode it into the character it stands for, so the README
+shows a space where you meant ` `.
+
 ````markdown
 # <sid>: <rule msg>
 
