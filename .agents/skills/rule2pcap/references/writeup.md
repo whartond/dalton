@@ -56,6 +56,9 @@ Build this table from `pcap_lint.py --frames`, not from memory.
 
 - <Conflicts between the rule and sources, rule quirks, IPS-only
   behaviour, pcap_lint findings left on purpose.>
+- <Inspection limits the rule depends on, such as an HTTP body limit
+  (`body-limit` note): what Dalton used, and that the user's sensors may
+  be configured differently.>
 
 ## Files
 

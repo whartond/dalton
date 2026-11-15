@@ -577,6 +577,29 @@ def add_notes(facts):
                 "encrypts it. pcapkit.tls_flights() defaults to TLS 1.2",
             )
         )
+    http = facts["proto"].startswith("http") or any(
+        b.startswith("http") for b in facts["buffers"]
+    )
+    limits = []
+    if "http.request_body" in facts["buffers"]:
+        limits.append(("request", "request-body-limit"))
+    if "http.response_body" in facts["buffers"] or (
+        http and {"file.data", "file_data"} & set(facts["buffers"])
+    ):
+        limits.append(("response", "response-body-limit"))
+    for side, limit in limits:
+        notes.append(
+            note(
+                "info",
+                "body-limit",
+                f"inspects the HTTP {side} body, which Suricata reads only up to "
+                f"libhtp's {limit} (100kb in Dalton's config and Suricata's "
+                "default). Production sensors may set it differently: bytes "
+                "past their limit never match, and padding ahead of the "
+                "payload evades the rule. Tell the user, and keep the matched "
+                "bytes well inside the limit",
+            )
+        )
     for name, purpose in EXTERNAL_KEYWORDS.items():
         if name in others:
             notes.append(
@@ -654,8 +677,8 @@ def add_notes(facts):
             note(
                 "info",
                 "transform",
-                f"{t['transform']} rewrites {t['buffer']} before matching: put the "
-                "encoded form on the wire so the decoded form matches",
+                f"{t['transform']} rewrites {t['buffer']} before matching: the "
+                "content matches the transformed bytes, not what is on the wire",
             )
         )
     used = {o["name"] for o in facts["_options"]}

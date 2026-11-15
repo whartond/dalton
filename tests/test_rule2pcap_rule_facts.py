@@ -337,6 +337,33 @@ def test_tls_certificate_note():
     assert "tls-certificate" in codes(rule["notes"])
 
 
+def test_body_limit_note():
+    def limits(rule):
+        return [
+            n["message"] for n in one_rule(rule)["notes"] if n["code"] == "body-limit"
+        ]
+
+    request = limits(
+        'alert http any any -> any any (msg:"x"; http.request_body; content:"a"; sid:1;)'
+    )
+    assert len(request) == 1 and "request-body-limit" in request[0]
+    legacy = limits(
+        'alert http any any -> any any (msg:"x"; content:"a"; http_client_body; sid:1;)'
+    )
+    assert len(legacy) == 1
+    response = limits(
+        'alert http any any -> any any (msg:"x"; file.data; content:"a"; sid:1;)'
+    )
+    assert len(response) == 1 and "response-body-limit" in response[0]
+    # file.data outside HTTP has other limits
+    assert not limits(
+        'alert smtp any any -> any any (msg:"x"; file.data; content:"a"; sid:1;)'
+    )
+    assert not limits(
+        'alert http any any -> any any (msg:"x"; http.uri; content:"/a"; sid:1;)'
+    )
+
+
 def test_pkt_data_resets_to_payload():
     rule = one_rule(
         'alert http any any -> any any (msg:"x"; http.uri; content:"/a"; '

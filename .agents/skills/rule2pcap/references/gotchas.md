@@ -52,11 +52,14 @@ Check this list before changing the traffic.
   `response-body-limit`. Content past the limit never matches, and junk
   padding ahead of a payload is a known evasion. React2Shell scanners pad
   by 128 KB, which hides the payload from body rules. Keep matched bytes
-  inside the limit. When attack tools pad, build a padded variant, test it
-  with `--expect-absent`, and confirm the cause with
-  `--set app-layer.protocols.http.libhtp.default-config.request-body-limit=256kb`;
-  the write-up then says the rule misses padded requests at the default
-  limit.
+  inside the limit. The limit is set per sensor, so Dalton's value says
+  nothing about the user's production sensors. Always say so in the
+  write-up (`rule_facts.py` notes it as `body-limit`). When attack tools
+  pad, build a padded variant, test it with `--expect-absent`, and confirm
+  the cause with
+  `--set app-layer.protocols.http.libhtp.default-config.request-body-limit=256kb`.
+  The write-up then says the rule misses requests padded past the limit,
+  whatever value the sensor uses.
 - **libhtp merges duplicate headers.** Two `Location:` headers become one
   value in `http.header`. Match repeats in `http.header.raw`. Expect an
   `applayer:RESPONSE_HEADER_REPETITION` anomaly; it's correct, not a defect.

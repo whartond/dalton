@@ -157,6 +157,9 @@ Save the rules to `$WORK/rule2pcap-output/test.rules`, then run
      size, or before the other side sends anything.
    - `min-version`: older engines won't load it.
    - `no-content`: the alert may land on a pseudo-packet.
+   - `body-limit`: the rule only sees an HTTP body up to the sensor's
+     configured limit. Tell the user in the write-up's Notes and in your
+     summary, since their production limit may differ from Dalton's.
 
    `references/gotchas.md` explains each.
 
