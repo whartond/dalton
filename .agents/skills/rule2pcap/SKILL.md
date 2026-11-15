@@ -192,17 +192,16 @@ traffic no real instance would produce.
    - what comes from sources and what you will invent.
 
    For a threshold or detection_filter rule, send count + 1 matching
-   events, inside the window, from the tracked address. Optionally build a
-   variant below the threshold to show it doesn't fire (test it with
-   `--expect-absent <sid>`). On TCP one event can count more than once
-   (see gotchas.md), so count − 1 events often still fire. First find the
-   matches per event: the `threshold` note from `rule_facts.py` gives the
-   usual cause, and a copy of the rule with `count 1` alerts on every
-   match. Then use few enough events that events × matches stays below
-   the count. A `type limit` rule alerts from the first match and has no
-   such variant. Test with
-   `--set runmode=single`, or the alert lands on a different packet each
-   run.
+   events, inside the window, from the tracked address. On raw TCP, one
+   event doesn't always make one match (see gotchas.md), so measure: run a
+   copy of the rule with `count 1` on the pcap, which alerts on every
+   match. If the matches fall short, the events may have merged into one
+   stream match; give each its own connection or say so. Optionally build
+   a variant below the threshold to show it doesn't fire (test it with
+   `--expect-absent <sid>`), sized from the same measurement. A `type
+   limit` rule alerts from the first match and has no such variant. Test
+   with `--set runmode=single`, or the alert lands on a different packet
+   each run.
 2. **Pick a template**, copying it to `$OUT/build.py` along with
    `$SKILL/templates/pcapkit.py`:
    - `build_flowsynth.py`: HTTP, DNS, SMTP and most TCP/UDP application

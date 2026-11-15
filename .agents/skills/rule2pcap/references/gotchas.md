@@ -30,18 +30,19 @@ Check this list before changing the traffic.
   inspected when it's ACKed, or when the stream is flushed, the alert is
   usually logged on a later packet than the one carrying the bytes (an
   ACK, or the FIN exchange). The write-up records both.
-- **One raw match can alert more than once.** A rule whose content is on
-  the raw payload (no sticky buffer) on TCP can match on the packet and
-  again on the reassembled stream, so it alerts twice per flow. A rule
-  with no content at all (a bare `byte_test`) can add a third alert at
-  flow timeout. A TCP rule with nothing to inspect in the payload (`flow`
-  and header keywords only) matches every packet in its direction, ACKs
-  and FINs included; `dsize` and `flags` rules match single packets once.
-  On UDP each packet counts once. The same multiple counting feeds
-  threshold and detection_filter counts: six raw-TCP beacons made 12
-  matches, and three beacons fired a `count 5` threshold. Rules on
-  app-layer buffers (`http.*`, `dns.*`, `tls.*`, `file.data`...) match
-  once per transaction, so five HTTP requests count five.
+- **Matches per event vary on raw TCP.** How many times one event matches
+  depends on the rule and the flow, and it feeds threshold and
+  detection_filter counts. Seen on 8.0.6 and 7.0.17: `content` with
+  `depth` matched on the packet and again on the stream, so six beacons in
+  six connections made 12 matches; the same content without `depth` made
+  6. Six small beacons in one connection made a single match, because the
+  stream is inspected in chunks. A rule with only `flow` matches every
+  packet in its direction, ACKs and FINs included, and a rule with only
+  header fields matches once per flow. `dsize` and `flags` rules, UDP
+  rules, and app-layer buffers (`http.*`, `dns.*`, `tls.*`,
+  `file.data`...) count once per packet or transaction. Don't predict it:
+  run a copy of the rule with `threshold:type threshold,track by_src,count
+  1,seconds 60`, which alerts on every match.
 - **Raw content plus app-layer state on to_client may never fire in IDS
   mode.** Examples are `content` with `ssl_state` or `ssl_version`. The
   state is set when the data is parsed, which is a later packet than the
@@ -93,7 +94,7 @@ Check this list before changing the traffic.
   `metadata.flowbits` on the eve event, or test a copy with `noalert`
   removed. Add the rule that uses the flowbit (`isset`) so something fires.
 - **Threshold and detection_filter** need enough matches inside the window,
-  tracked by the right address. Remember the double counting above.
+  tracked by the right address. Measure the matches per event (above).
 - **Datasets, iprep, Lua and hash lists** need files the job doesn't have.
   A Dalton job can't supply them through this skill; say the rule can't be
   tested as written, and test a copy without that keyword only if the user

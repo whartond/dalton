@@ -199,7 +199,6 @@ SURICATA8_KEYWORDS = set(
     """.split()
 )
 TO_CLIENT = {"to_client", "from_server"}
-PAYLOAD_KEYWORDS = {"byte_test", "byte_jump", "byte_extract", "byte_math", "isdataat"}
 GENERIC_PROTOS = {"tcp", "ip", "any", "pkthdr"}  # may carry HTTP or not
 TO_SERVER = {"to_server", "from_client"}
 # Defaults from Suricata's suricata.yaml; a job's own config may differ.
@@ -529,26 +528,18 @@ def body_limits(facts):
 
 
 def per_event(facts):
-    """Why one event can count more than once toward a TCP threshold."""
-    if facts["proto"] != "tcp":
-        return ""
-    if any(c["buffer"] == "payload" for c in facts["contents"]):
-        return "; a raw content match can count twice (packet and stream)"
-    if facts["buffers"] or any(
-        o["name"] in ("content", "uricontent", "pcre") for o in facts["_options"]
+    """Warn when matches per event on TCP or IP can't be read off the rule."""
+    if facts["proto"] not in ("tcp", "ip"):
+        return ""  # app-layer buffers count per transaction, UDP per packet
+    if facts["buffers"] and not any(
+        c["buffer"] == "payload" for c in facts["contents"]
     ):
         return ""
-    others = facts["other_keywords"]
-    if any(k in others for k in PAYLOAD_KEYWORDS):
-        return (
-            "; with no content, one event can count three times "
-            "(packet, stream and flow timeout)"
-        )
-    if any(k in others for k in ("dsize", "flags")):
-        return ""  # checked on single packets
     return (
-        "; with nothing to match in the payload it counts every packet in "
-        "its direction, ACKs and FINs included"
+        "; matches per event vary on raw TCP: content can match on both "
+        "packet and stream, small events in one flow can merge into one "
+        "stream match, a flow-only rule matches every packet (ACKs too), and "
+        "a header-only rule once per flow. Measure with a copy at count 1"
     )
 
 
@@ -611,13 +602,13 @@ def add_notes(facts):
                 )
             else:
                 what = f"{count} matching events (an alert every {count} matches)"
-            twice = per_event(facts)
+            caveat = per_event(facts)
             notes.append(
                 note(
                     "info",
                     kind,
                     f"needs {what} in {spec.get('seconds', '?')}s tracked "
-                    f"{spec.get('track', '?')}{twice}. Test with --set "
+                    f"{spec.get('track', '?')}{caveat}. Test with --set "
                     "runmode=single so the alert lands on the same packet every run",
                 )
             )

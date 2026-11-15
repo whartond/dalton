@@ -314,39 +314,21 @@ def test_requires_note():
     assert "requires" in codes(rule["notes"])
 
 
-def test_double_counting_warning_only_for_raw_content():
-    raw = one_rule(
-        'alert tcp any any -> any any (msg:"x"; content:"a"; '
-        "threshold:type both,track by_src,count 5,seconds 60; sid:1;)"
-    )
-    http = one_rule(
-        'alert http any any -> any any (msg:"x"; http.uri; content:"/a"; '
-        "threshold:type both,track by_src,count 5,seconds 60; sid:2;)"
-    )
-
-    def message(rule):
+def test_matches_per_event_caveat_only_where_counting_is_unclear():
+    def note_for(options, proto="tcp"):
+        rule = one_rule(
+            f'alert {proto} any any -> any any (msg:"x"; {options} '
+            "threshold:type threshold,track by_src,count 5,seconds 60; sid:4;)"
+        )
         return next(n["message"] for n in rule["notes"] if n["code"] == "threshold")
 
-    assert "count twice" in message(raw) and "count twice" not in message(http)
-    bare = one_rule(
-        'alert tcp any any -> any any (msg:"x"; byte_test:1,=,82,0; '
-        "threshold:type threshold,track by_src,count 5,seconds 60; sid:3;)"
-    )
-    assert "three times" in message(bare) and "three times" not in message(http)
-
-    def note_for(options, proto="tcp"):
-        return message(
-            one_rule(
-                f'alert {proto} any any -> any any (msg:"x"; {options} '
-                "threshold:type threshold,track by_src,count 5,seconds 60; sid:4;)"
-            )
-        )
-
-    assert "every packet" in note_for("flow:established,to_server;")
-    assert "counts" not in note_for("flags:S;") and "count t" not in note_for(
-        "dsize:>0;"
-    )
-    assert "count twice" not in note_for('content:"a";', proto="udp")
+    caveat = "Measure with a copy at count 1"
+    assert caveat in note_for('content:"a";')
+    assert caveat in note_for("flow:established,to_server;")
+    assert caveat in note_for("flow:established,to_server;", proto="ip")
+    assert caveat in note_for("byte_test:1,=,82,0;")
+    assert caveat not in note_for('http.uri; content:"/a";', proto="http")
+    assert caveat not in note_for('content:"a";', proto="udp")
 
 
 def test_tls_certificate_note():
