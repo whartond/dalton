@@ -272,14 +272,16 @@ def randomize_isns(pkts, rng):
     return out
 
 
-def teardown(pkts, closer="server", idle=0.2, rtt=0.045):
+def teardown(pkts, closer="server", idle=0.2, rtt=0.045, capture="client"):
     """Add a FIN, ACK, FIN, ACK close to every TCP flow that has none.
 
     Flowsynth 1.4 emits no teardown. Without one, data at the end of a flow
     is inspected only when the flow times out, after rules that ran earlier.
 
-    closer is "server" or "client". The capture point is near the client,
-    so the server's packets show up an RTT after the client's. The new
+    closer is "server" or "client". capture is where the capture point is:
+    "client" (the default, e.g. an inside host calling out) or "server"
+    (e.g. an inbound attack seen on the server's LAN). A packet from the far
+    side that answers one from the near side shows up an RTT later. The new
     packets copy their IP header from earlier ones: run set_ip_fields()
     afterwards so IP IDs stay unique.
     """
@@ -303,12 +305,13 @@ def teardown(pkts, closer="server", idle=0.2, rtt=0.045):
         if server is None:
             continue
         a, b = (server, client) if closer == "server" else (client, server)
+        far = server if capture == "client" else client
         t = max(float(p.time) for p in flow) + idle
         steps = (
             (a, "FA", nxt[a], nxt[b], 0),
-            (b, "A", nxt[b], nxt[a] + 1, rtt if a == client else 0.0003),
+            (b, "A", nxt[b], nxt[a] + 1, rtt if b == far else 0.0003),
             (b, "FA", nxt[b], nxt[a] + 1, 0.0002),
-            (a, "A", nxt[a] + 1, nxt[b] + 1, rtt if a == server else 0.0003),
+            (a, "A", nxt[a] + 1, nxt[b] + 1, rtt if a == far else 0.0003),
         )
         for side, flags, seq, ack, dt in steps:
             q = last[side].copy()
@@ -592,7 +595,10 @@ def mint_chain(
 
     chain_path gets leaf then intermediate, which is what a server sends and
     what tls_flights() loads; key_path gets the leaf key. serials is
-    (intermediate serial, leaf serial). Needs the cryptography package.
+    (intermediate serial, leaf serial); public CAs use random serials of
+    about 128 bits. The days arguments may be fractional: a notAfter of
+    23:59:59, as many CAs use, is days - 1/86400. Needs the cryptography
+    package.
     """
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization

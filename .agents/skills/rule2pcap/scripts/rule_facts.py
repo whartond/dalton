@@ -455,7 +455,8 @@ def analyse(rule):
         elif value is None and (
             name in LEGACY_STICKY or ("." in name and name not in NOT_BUFFERS)
         ):
-            buffer = name
+            # pkt_data resets to the raw payload
+            buffer = "payload" if name == "pkt_data" else name
             last_content = None
             add_unique(facts["buffers"], name)
             if name in HEADER_KEYWORDS:  # tcp.hdr etc.: a buffer of header bytes
@@ -546,18 +547,36 @@ def add_notes(facts):
                 what = f"more than {count} matching events (alerts from match {need})"
             elif spec.get("type") == "limit":
                 what = f"one matching event (it limits alerts to {count})"
+            elif spec.get("type") == "both":
+                what = (
+                    f"{count} matching events (one alert, at match {count}, per window)"
+                )
             else:
-                what = f"at least {count} matching events"
+                what = f"{count} matching events (an alert every {count} matches)"
+            raw = any(c["buffer"] == "payload" for c in facts["contents"])
+            twice = (
+                "; a raw content match can count twice (packet and stream)"
+                if raw
+                else ""
+            )
             notes.append(
                 note(
                     "info",
                     kind,
                     f"needs {what} in {spec.get('seconds', '?')}s tracked "
-                    f"{spec.get('track', '?')}; a content match can count twice "
-                    "(packet and stream). Test with --set runmode=single so the "
-                    "alert lands on the same packet every run",
+                    f"{spec.get('track', '?')}{twice}. Test with --set "
+                    "runmode=single so the alert lands on the same packet every run",
                 )
             )
+    if any(b.startswith(("tls.cert", "tls_cert")) for b in facts["buffers"]):
+        notes.append(
+            note(
+                "info",
+                "tls-certificate",
+                "the certificate is only visible in TLS 1.2 or older; TLS 1.3 "
+                "encrypts it. pcapkit.tls_flights() defaults to TLS 1.2",
+            )
+        )
     for name, purpose in EXTERNAL_KEYWORDS.items():
         if name in others:
             notes.append(

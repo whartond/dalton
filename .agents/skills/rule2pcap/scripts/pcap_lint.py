@@ -482,8 +482,7 @@ def main(argv=None):
         except (OSError, ValueError) as exc:
             print(json.dumps({"error": f"cannot read {args.pcap}: {exc}"}))
             return 2
-        for row in rows:
-            print(json.dumps(row))
+        print(json.dumps({"pcap": args.pcap, "frames": rows}, indent=1))
         return 0
     try:
         result = lint(args.pcap)

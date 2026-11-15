@@ -55,7 +55,7 @@ research.
 1. **Build venv.** If `$VENV` doesn't exist, create it:
    ```
    python3 -m venv $VENV
-   $VENV/bin/pip install -r $SKILL/requirements.txt
+   $VENV/bin/pip install --no-cache-dir -r $SKILL/requirements.txt
    ```
    Never install into the system Python. If you can't create a venv, stop
    and tell the user what's missing.
@@ -190,16 +190,18 @@ traffic no real instance would produce.
 
    For a threshold or detection_filter rule, send count + 1 matching
    events, inside the window, from the tracked address. Optionally build a
-   count − 1 variant to show it doesn't fire below the threshold. Test it
-   with `--set runmode=single`, or the alert lands on a different packet
-   each run.
+   count − 1 variant to show it doesn't fire below the threshold (test it
+   with `--expect-absent <sid>`). Test both with `--set runmode=single`, or
+   the alert lands on a different packet each run.
 2. **Pick a template**, copying it to `$OUT/build.py` along with
    `$SKILL/templates/pcapkit.py`:
    - `build_flowsynth.py`: HTTP, DNS, SMTP and most TCP/UDP application
      traffic, including `dsize`/`stream_size` rules whose payload fits in
      one segment.
    - `build_scapy.py`: header-field rules, exact segmentation, many or
-     interleaved connections (threshold, volume), ICMP and raw IP.
+     interleaved connections (threshold, volume), ICMP and raw IP. For
+     repeated HTTP requests (e.g. an HTTP threshold rule), build each
+     connection with `pk.http_message()`.
    - `build_tls.py`: certificate, SNI and TLS-handshake rules.
 3. **Edit the build:**
    - Set `NAME` and `SEED` (use the target sid), and the start time.
@@ -224,7 +226,8 @@ $VENV/bin/python $SKILL/scripts/dalton_client.py test --pcap <name>.pcap --rules
 - **Test:** it passes when every expected sid fires on every engine that
   loads the rule.
   - By default the expected sids are every rule in test.rules that isn't
-    `noalert`. Use `--expect-sid` to narrow that.
+    `noalert`. Use `--expect-sid` to narrow that, and `--expect-absent`
+    for a sid that must not fire (a below-threshold or near-miss pcap).
   - Per engine, `expected_fired` says which fired, `alert_lines` holds the
     engine's own alert lines for the write-up, and `first` gives the packet
     the first alert landed on.

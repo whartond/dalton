@@ -271,8 +271,11 @@ def test_standalone_noalert_note():
 @pytest.mark.parametrize(
     "option, wanted",
     [
-        ("threshold:type threshold,track by_src,count 5,seconds 60", "at least 5"),
-        ("threshold:type both,track by_src,count 5,seconds 60", "at least 5"),
+        ("threshold:type threshold,track by_src,count 5,seconds 60", "every 5 matches"),
+        (
+            "threshold:type both,track by_src,count 5,seconds 60",
+            "one alert, at match 5",
+        ),
         ("threshold:type limit,track by_src,count 5,seconds 60", "one matching event"),
         ("detection_filter:track by_src,count 5,seconds 60", "from match 6"),
     ],
@@ -309,3 +312,34 @@ def test_requires_note():
         'content:"a"; sid:1;)'
     )
     assert "requires" in codes(rule["notes"])
+
+
+def test_double_counting_warning_only_for_raw_content():
+    raw = one_rule(
+        'alert tcp any any -> any any (msg:"x"; content:"a"; '
+        "threshold:type both,track by_src,count 5,seconds 60; sid:1;)"
+    )
+    http = one_rule(
+        'alert http any any -> any any (msg:"x"; http.uri; content:"/a"; '
+        "threshold:type both,track by_src,count 5,seconds 60; sid:2;)"
+    )
+
+    def message(rule):
+        return next(n["message"] for n in rule["notes"] if n["code"] == "threshold")
+
+    assert "count twice" in message(raw) and "count twice" not in message(http)
+
+
+def test_tls_certificate_note():
+    rule = one_rule(
+        'alert tls any any -> any any (msg:"x"; tls.cert_issuer; content:"Z"; sid:1;)'
+    )
+    assert "tls-certificate" in codes(rule["notes"])
+
+
+def test_pkt_data_resets_to_payload():
+    rule = one_rule(
+        'alert http any any -> any any (msg:"x"; http.uri; content:"/a"; '
+        'pkt_data; content:"raw"; sid:1;)'
+    )
+    assert [c["buffer"] for c in rule["contents"]] == ["http.uri", "payload"]

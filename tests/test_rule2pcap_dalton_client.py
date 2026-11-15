@@ -677,3 +677,16 @@ def test_docker_runner_strips_rule_indentation(files, capsys, tmp_path, monkeypa
         ],
     )
     assert sent == ['alert tcp any any -> any any (msg:"x"; sid:1000001;)\n']
+
+
+def test_expect_absent(dalton, files, capsys):
+    pcap, rules = files
+    base = ["test", "--url", dalton.url, "--pcap", str(pcap), "--rules", str(rules)]
+    # the fake fires 1000001: a must-not-fire check on it fails
+    code, report = run(capsys, base + ["--expect-absent", "1000001"])
+    assert code == 1 and report["pass"] is False
+    assert report["expect"] == [] and report["expect_absent"] == ["1000001"]
+    assert report["results"][0]["expected_absent"] == {"1000001": False}
+    # and one on a sid that doesn't fire passes, alongside the default expect
+    code, report = run(capsys, base + ["--expect-absent", "4242"])
+    assert code == 0 and report["pass"] is True and report["expect"] == ["1000001"]

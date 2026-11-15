@@ -187,3 +187,34 @@ def test_tls_flights_with_an_empty_side(tmp_path, tls, exchanges):
         cert, key, exchanges, str(tmp_path / "keys.log"), max_version=tls
     )
     assert flights and {d for d, _ in flights} == {">", "<"}
+
+
+@pytest.mark.parametrize("capture", ["client", "server"])
+def test_teardown_rtt_follows_the_capture_point(capture):
+    from scapy.layers.inet import IP, TCP
+    from scapy.layers.l2 import Ether
+
+    pk = pcapkit()
+    syn = (
+        Ether()
+        / IP(src="10.0.0.5", dst="203.0.113.9")
+        / TCP(sport=49152, dport=80, flags="S", seq=100)
+    )
+    synack = (
+        Ether()
+        / IP(src="203.0.113.9", dst="10.0.0.5")
+        / TCP(sport=80, dport=49152, flags="SA", seq=500, ack=101)
+    )
+    # serialise, so lengths and checksums are filled in as in a real capture
+    syn, synack = Ether(bytes(syn)), Ether(bytes(synack))
+    syn.time, synack.time = 1000.0, 1000.05
+    pkts = pk.teardown([syn, synack], closer="server", rtt=0.045, capture=capture)
+    fin, ack, fin2, last = pkts[2:]
+    gap_ack, gap_last = float(ack.time - fin.time), float(last.time - fin2.time)
+    # near the client: the client's ACK of the server's FIN is local, and the
+    # server's ACK of the client's FIN arrives an RTT later; the reverse near
+    # the server
+    if capture == "client":
+        assert gap_ack < 0.01 and gap_last > 0.04
+    else:
+        assert gap_ack > 0.04 and gap_last < 0.01

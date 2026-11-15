@@ -882,7 +882,10 @@ def cmd_preflight(args):
 def cmd_test(args):
     with open(args.rules, encoding="utf-8") as fh:
         rules_text = join_continuations(fh.read())
-    expect = [str(s) for s in args.expect_sid] or alerting_sids(rules_text)
+    absent = [str(s) for s in args.expect_absent]
+    expect = [str(s) for s in args.expect_sid] or [
+        s for s in alerting_sids(rules_text) if s not in absent
+    ]
     if args.runner == "docker":
         report = run_docker(args, rules_text, expect)
     else:
@@ -891,21 +894,27 @@ def cmd_test(args):
         print(json.dumps(report, indent=2))
         return 0
     report["expect"] = expect
+    report["expect_absent"] = absent
     mark_rule_errors(report)
     loaded = [r for r in report["results"] if r["loaded"]]
     # An engine that can't load the rule (e.g. a keyword newer than that
     # version) says nothing about the pcap. Report it, judge the rest. An
     # engine whose job didn't finish fails the test: it might not fire.
     for r in report["results"]:
-        if not r["loaded"]:
-            r["expected_fired"] = None  # nothing to judge
+        if r["loaded"]:
+            r["expected_absent"] = {sid: sid not in r["fired"] for sid in absent}
+        else:
+            r["expected_fired"] = r["expected_absent"] = None  # nothing to judge
     report["pass"] = (
-        bool(expect)
+        bool(expect or absent)
         and bool(loaded)
         and not report["not_run"]
-        and all(all(r["expected_fired"].values()) for r in loaded)
+        and all(
+            all(r["expected_fired"].values()) and all(r["expected_absent"].values())
+            for r in loaded
+        )
     )
-    if not expect:
+    if not expect and not absent:
         report["error"] = "no sids to check: every rule is noalert or has no sid"
     print(json.dumps(report, indent=2))
     if report["not_run"]:
@@ -980,7 +989,15 @@ def runner_options(test):
         "--expect-sid",
         action="append",
         default=[],
-        help="sid that must fire (repeatable; default: every alerting rule)",
+        help="sid that must fire (repeatable; default: every alerting rule "
+        "not given to --expect-absent)",
+    )
+    test.add_argument(
+        "--expect-absent",
+        action="append",
+        default=[],
+        help="sid that must not fire, e.g. on a below-threshold or near-miss "
+        "pcap (repeatable)",
     )
     test.add_argument(
         "--engine-tech",

@@ -177,8 +177,8 @@ def test_frames_listing(tmp_path, capsys):
     assert rows[3]["payload"].startswith("GET / HTTP/1.1..Host")
     assert rows[3]["src"] == f"{CLIENT}:49152"
     assert pl.main([path, "--frames"]) == 0
-    lines = capsys.readouterr().out.splitlines()
-    assert len(lines) == len(rows) and json.loads(lines[0])["frame"] == 1
+    listing = json.loads(capsys.readouterr().out)  # one JSON document
+    assert listing["frames"] == rows and listing["frames"][0]["frame"] == 1
 
 
 def test_mixed_ipv4_and_ipv6_addresses(tmp_path):

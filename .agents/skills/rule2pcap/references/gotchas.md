@@ -115,6 +115,9 @@ Check this list before changing the traffic.
     repeats a header.
 
   Anything else: find out why before shipping.
+- **`smtp.mail_from`** (Suricata 8) holds the address with its angle
+  brackets and stops before ESMTP parameters: for `MAIL
+  FROM:<a@b.example> SIZE=698` it's `<a@b.example>`.
 - **Rules with newer keywords** (`smtp.mail_from`, `from_base64` and other
   Suricata 8 additions) fail to load on older engines. `test` lists those
   engines in `not_loaded` and judges the pass on the rest.
