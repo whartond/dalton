@@ -81,8 +81,9 @@ client would plausibly send, and list it in the write-up.
   advertises STARTTLS and the client uses it, nothing after EHLO is
   visible. A rule on envelope or message fields only sees plaintext SMTP,
   so leave STARTTLS out and say so.
-- **TCP:** every segment ACKed, no sequence gaps, MSS-sized segments, and a
-  FIN or RST close.
+- **TCP:** every segment ACKed (a cumulative ACK counts), never more data
+  in flight than the receiver's window, no sequence gaps, MSS-sized
+  segments, and a FIN or RST close.
 
 ## Payload content
 

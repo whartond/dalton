@@ -46,20 +46,27 @@ Check this list before changing the traffic.
   `dns` and the like need the protocol detected, which needs a handshake
   and traffic both ways. Check `app_proto` in the eve alert, or the
   `anomaly` counts in the test output.
-- **HTTP bodies are inspected only up to a limit.** `http.request_body`
-  sees the first `request-body-limit` bytes (100kb in Dalton's 7.0 config
-  and Suricata's default), and `file.data` on responses stops at
-  `response-body-limit`. Content past the limit never matches, and junk
-  padding ahead of a payload is a known evasion. React2Shell scanners pad
-  by 128 KB, which hides the payload from body rules. Keep matched bytes
-  inside the limit. The limit is set per sensor, so Dalton's value says
-  nothing about the user's production sensors. Always say so in the
-  write-up (`rule_facts.py` notes it as `body-limit`). When attack tools
-  pad, build a padded variant, test it with `--expect-absent`, and confirm
-  the cause with
-  `--set app-layer.protocols.http.libhtp.default-config.request-body-limit=256kb`.
-  The write-up then says the rule misses requests padded past the limit,
-  whatever value the sensor uses.
+- **HTTP bodies are inspected only up to a limit.** libhtp hands
+  Suricata the first `request-body-limit` bytes of a request body and the
+  first `response-body-limit` bytes of a response body. That bounds
+  `http.request_body`, `http.response_body` and HTTP `file.data` (which
+  is the request body on a to_server rule). The limit is 100 KiB in the
+  stock suricata.yaml and Dalton's default configs, 4 KiB if the key is
+  unset, and `server-config` blocks can override it per address. Content
+  past the limit never matches, and junk padding ahead of the payload is a
+  known evasion: Assetnote's react2shell-scanner has a `--waf-bypass`
+  option that pads by 128 KiB. Keep matched bytes well inside the limit.
+  The limit is set per sensor, so Dalton's value says nothing about the
+  user's production sensors; always say so in the write-up (`rule_facts.py`
+  notes it as `body-limit`). When attack tools pad:
+  1. Build a padded variant and test it with `--expect-absent <sid>`.
+  2. Confirm the cause by raising the limit for that side, e.g.
+     `--set app-layer.protocols.http.libhtp.default-config.request-body-limit=256kb`
+     (or `response-body-limit`), with `--expect-sid <sid>`: it must fire
+     now. If it still doesn't, the pcap is broken, not the rule; check
+     `pcap_lint.py` (e.g. `beyond-window`).
+  3. Say in the write-up that the rule misses bodies padded past the
+     sensor's limit, whatever that is set to.
 - **libhtp merges duplicate headers.** Two `Location:` headers become one
   value in `http.header`. Match repeats in `http.header.raw`. Expect an
   `applayer:RESPONSE_HEADER_REPETITION` anomaly; it's correct, not a defect.

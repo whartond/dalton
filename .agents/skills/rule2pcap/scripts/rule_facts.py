@@ -494,6 +494,32 @@ def add_unique(items, item):
         items.append(item)
 
 
+def body_limits(facts):
+    """(side, libhtp setting) for each HTTP body the rule inspects."""
+    proto = facts["proto"] or ""
+    if proto == "http2":
+        return []  # libhtp's limits are for HTTP/1
+    buffers = set(facts["buffers"])
+    for p in facts["pcre"]:
+        # legacy pcre modifiers: P is the request body, Q the response body
+        flags = p["value"].strip('"').rsplit("/", 1)[-1]
+        if "P" in flags:
+            buffers.add("http.request_body")
+        if "Q" in flags:
+            buffers.add("http.response_body")
+    http = proto.startswith("http") or any(b.startswith("http") for b in buffers)
+    request = "http.request_body" in buffers
+    response = "http.response_body" in buffers
+    if http and buffers & {"file.data", "file_data"}:
+        # file.data follows the rule's direction; with none, either body
+        flow = set(facts["flow"])
+        request = request or not flow & TO_CLIENT
+        response = response or not flow & TO_SERVER
+    return [("request", "request-body-limit")] * request + [
+        ("response", "response-body-limit")
+    ] * response
+
+
 def add_notes(facts):
     """Flag things in the rule that change how the pcap is built or tested."""
     notes = facts["notes"]
@@ -577,27 +603,18 @@ def add_notes(facts):
                 "encrypts it. pcapkit.tls_flights() defaults to TLS 1.2",
             )
         )
-    http = facts["proto"].startswith("http") or any(
-        b.startswith("http") for b in facts["buffers"]
-    )
-    limits = []
-    if "http.request_body" in facts["buffers"]:
-        limits.append(("request", "request-body-limit"))
-    if "http.response_body" in facts["buffers"] or (
-        http and {"file.data", "file_data"} & set(facts["buffers"])
-    ):
-        limits.append(("response", "response-body-limit"))
-    for side, limit in limits:
+    for side, limit in body_limits(facts):
         notes.append(
             note(
                 "info",
                 "body-limit",
                 f"inspects the HTTP {side} body, which Suricata reads only up to "
-                f"libhtp's {limit} (100kb in Dalton's config and Suricata's "
-                "default). Production sensors may set it differently: bytes "
-                "past their limit never match, and padding ahead of the "
-                "payload evades the rule. Tell the user, and keep the matched "
-                "bytes well inside the limit",
+                f"libhtp's {limit}: 100 KiB in the stock suricata.yaml and "
+                "Dalton's default configs, 4 KiB if the key is unset, and "
+                "server-config blocks can override it per address. "
+                "Production sensors may differ: bytes past their limit never "
+                "match, and padding ahead of the payload evades the rule. Tell "
+                "the user, and keep the matched bytes well inside the limit",
             )
         )
     for name, purpose in EXTERNAL_KEYWORDS.items():

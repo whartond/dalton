@@ -218,3 +218,21 @@ def test_teardown_rtt_follows_the_capture_point(capture):
         assert gap_ack < 0.01 and gap_last > 0.04
     else:
         assert gap_ack > 0.04 and gap_last < 0.01
+
+
+def test_tcp_session_keeps_big_messages_inside_the_window(tmp_path):
+    import random
+
+    from scapy.utils import wrpcap
+
+    pk = pcapkit()
+    client = pk.Host("10.0.0.5", "02:00:00:00:00:01")
+    server = pk.Host("203.0.113.9", "02:00:00:00:00:02", ttl=52)
+    big = b"x" * 200_000
+    pkts, _ = pk.tcp_session(
+        1000.0, client, server, 49152, 80, [(">", big), ("<", big)], random.Random(1)
+    )
+    path = tmp_path / "big.pcap"
+    wrpcap(str(path), pkts)
+    lint = load("pcap_lint").lint(str(path))
+    assert "beyond-window" not in {f["code"] for f in lint["findings"]}

@@ -288,6 +288,7 @@ a stand-in setter, counts as done if you say so clearly.
    - the full absolute path of the pcap and the output directory;
    - the per-version result;
    - the main things invented;
+   - inspection limits that depend on their sensors' config (`body-limit`);
    - anything they need to decide on.
 
 ## Ground rules

@@ -52,6 +52,7 @@ may withhold exploit details outright. When a page carries bytes that
 matter (a request, headers, a payload, a code sample), fetch it raw
 (`curl -sL`) and read its `<pre>` and `<code>` blocks. In the source list,
 mark pages you read only through a summary, as you mark search snippets.
+Like any web access, `curl` may need the user's approval first.
 
 ## Test the rule against what was seen
 

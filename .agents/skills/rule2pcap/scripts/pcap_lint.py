@@ -285,6 +285,9 @@ def new_flow(proto, client, server):
         "rst": False,
         "next": {"c": None, "s": None},
         "mss": {"c": None, "s": None},
+        "wscale": {"c": None, "s": None},
+        # right edge of the receive window each side last offered
+        "edge": {"c": None, "s": None},
         "data_before_handshake": None,
         "first_frame": None,
     }
@@ -314,6 +317,8 @@ def track_tcp(out, flows, frame, ts, ip, tcp):
         for opt in tcp.options or []:
             if opt[0] == "MSS":
                 flow["mss"][side] = opt[1]
+            if opt[0] == "WScale":
+                flow["wscale"][side] = opt[1]
     if flags.F:
         flow["fin"] = True
     if flags.R:
@@ -354,6 +359,24 @@ def track_tcp(out, flows, frame, ts, ip, tcp):
         end = (tcp.seq + seg_len) % SEQ_MOD
         if seq_after(end, expected):
             flow["next"][side] = end
+    edge = flow["edge"][other]
+    if plen and edge is not None:
+        over = (tcp.seq + plen - edge) % SEQ_MOD
+        if 0 < over < 2**31:
+            out.add(
+                "warning",
+                "beyond-window",
+                "segment runs past the receive window the other side offered; "
+                "Suricata may drop the excess without logging an anomaly, "
+                "truncating the stream. ACK the data in window-sized flights",
+                frame,
+            )
+    if flags.A:
+        # a SYN's window is never scaled; later ones are, if both sides
+        # offered window scaling
+        both = None not in flow["wscale"].values()
+        shift = flow["wscale"][side] if both and not flags.S else 0
+        flow["edge"][side] = (tcp.ack + (tcp.window << shift)) % SEQ_MOD
     peer_next = flow["next"][other]
     if flags.A and peer_next is not None and seq_after(tcp.ack, peer_next):
         out.add(

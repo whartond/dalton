@@ -193,3 +193,11 @@ def test_mixed_ipv4_and_ipv6_addresses(tmp_path):
     result = pl.lint(write(tmp_path, stamp(pkts)))
     assert "public-address" in codes(result)
     assert result["summary"]["addresses"]["public"][-1] == "2606:4700::1"
+
+
+def test_data_past_the_receive_window(tmp_path):
+    pkts = session(request=b"A" * 1200)
+    pkts[1][TCP].window = 1000  # the SYN/ACK offers 1000 bytes, unscaled
+    assert "beyond-window" in codes(pl.lint(write(tmp_path, stamp(pkts))))
+    pkts[1][TCP].window = 1200
+    assert "beyond-window" not in codes(pl.lint(write(tmp_path, stamp(pkts), "y.pcap")))

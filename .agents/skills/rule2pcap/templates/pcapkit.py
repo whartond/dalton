@@ -394,8 +394,11 @@ def tcp_session(
     the LAN) or "server" (an inbound connection to a local server). A
     packet from the far end that answers the near end arrives `rtt` later;
     everything else is sub-millisecond. Data is segmented at the MSS and
-    each message is ACKed. The connection ends with a FIN close started by
-    `closer`, or closer=None to leave it open.
+    each message is ACKed. A message bigger than the receiver's window is
+    sent in flights, each ACKed before the next: the window in a SYN isn't
+    scaled, so a peer that has sent only its SYN offers just `window`
+    bytes. The connection ends with a FIN close started by `closer`, or
+    closer=None to leave it open.
     """
     out = []
     far = "<" if near == "client" else ">"
@@ -417,6 +420,13 @@ def tcp_session(
         ("WScale", 7),
     ]
     last = [None]
+    wscale = {">": 8, "<": 7}  # from copts and sopts
+    scaled = {">": False, "<": False}  # has that side sent a non-SYN packet
+
+    def window(side):
+        """Bytes the side is offering to receive."""
+        host = client if side == ">" else server
+        return host.window << wscale[side] if scaled[side] else host.window
 
     def send(at, frm, flags, data=b"", options=None):
         back = "<" if frm == ">" else ">"
@@ -436,6 +446,7 @@ def tcp_session(
         out.append(p)
         seq[frm] += len(data) + (1 if "S" in flags or "F" in flags else 0)
         last[0] = frm
+        scaled[frm] = scaled[frm] or "S" not in flags
 
     def step(frm):
         """Delay before a packet from frm: an RTT if it answers across the WAN."""
@@ -449,11 +460,20 @@ def tcp_session(
     t += step(">")
     send(t, ">", "A")
     for frm, data in messages:
-        t += step(frm)
-        for i in range(0, len(data), mss):
-            send(t, frm, "PA", data[i : i + mss])
-            t += 0.00004
         back = "<" if frm == ">" else ">"
+        t += step(frm)
+        flight = 0
+        for i in range(0, len(data), mss):
+            segment = data[i : i + mss]
+            if flight and flight + len(segment) > window(back):
+                # window full: wait for the receiver's ACK
+                t += step(back)
+                send(t, back, "A")
+                t += step(frm)
+                flight = 0
+            send(t, frm, "PA", segment)
+            flight += len(segment)
+            t += 0.00004
         t += step(back)
         send(t, back, "A")
     if closer:

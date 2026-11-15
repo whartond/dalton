@@ -338,30 +338,31 @@ def test_tls_certificate_note():
 
 
 def test_body_limit_note():
-    def limits(rule):
-        return [
-            n["message"] for n in one_rule(rule)["notes"] if n["code"] == "body-limit"
-        ]
+    def limits(options, proto="http"):
+        rule = one_rule(f'alert {proto} any any -> any any (msg:"x"; {options} sid:1;)')
+        found = [n["message"] for n in rule["notes"] if n["code"] == "body-limit"]
+        return sorted(m.split("libhtp's ")[1].split(":")[0] for m in found)
 
-    request = limits(
-        'alert http any any -> any any (msg:"x"; http.request_body; content:"a"; sid:1;)'
+    request, response = ["request-body-limit"], ["response-body-limit"]
+    assert limits('http.request_body; content:"a";') == request
+    assert limits('content:"a"; http_client_body;') == request
+    assert limits('pcre:"/a/P";') == request
+    assert limits('http.response_body; content:"a";') == response
+    # file.data follows the direction; with none it could be either body
+    assert limits('flow:to_server; file.data; content:"a";') == request
+    assert limits('flow:established,to_client; file.data; content:"a";') == response
+    assert limits('file.data; content:"a";') == request + response
+    # other protocols, and HTTP/2, aren't bounded by libhtp's limits
+    assert limits('file.data; content:"a";', proto="smtp") == []
+    assert limits('file.data; content:"a";', proto="http2") == []
+    assert limits('http.uri; content:"/a";') == []
+
+
+def test_malformed_header_is_a_note_not_a_crash():
+    rule = one_rule(
+        'alert http any any any any (msg:"x"; file.data; content:"a"; sid:1;)'
     )
-    assert len(request) == 1 and "request-body-limit" in request[0]
-    legacy = limits(
-        'alert http any any -> any any (msg:"x"; content:"a"; http_client_body; sid:1;)'
-    )
-    assert len(legacy) == 1
-    response = limits(
-        'alert http any any -> any any (msg:"x"; file.data; content:"a"; sid:1;)'
-    )
-    assert len(response) == 1 and "response-body-limit" in response[0]
-    # file.data outside HTTP has other limits
-    assert not limits(
-        'alert smtp any any -> any any (msg:"x"; file.data; content:"a"; sid:1;)'
-    )
-    assert not limits(
-        'alert http any any -> any any (msg:"x"; http.uri; content:"/a"; sid:1;)'
-    )
+    assert "header" in codes(rule["notes"])
 
 
 def test_pkt_data_resets_to_payload():
