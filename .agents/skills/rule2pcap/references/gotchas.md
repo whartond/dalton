@@ -20,22 +20,25 @@ Check this list before changing the traffic.
   flow is inspected only at flow timeout or when the pcap ends. That
   reorders alerts against rules that ran earlier. Flowsynth 1.4 emits no
   teardown; add one with `pcapkit.teardown()`.
-- **Some alerts land on pseudo-packets anyway.** Rules with no content
-  (a bare `byte_test`, `dsize` only) and raw-stream matches on a flow whose
-  protocol wasn't recognised can alert when the stream is flushed, even
-  with a proper close. The alert then has `pcap_cnt` null and a `pkt_src`
+- **Some alerts land on pseudo-packets anyway.** Rules with no content (a
+  bare `byte_test`) and raw-stream matches on a flow whose protocol wasn't
+  recognised can alert when the stream is flushed, even with a proper
+  close. (`dsize` is checked on packets only, so a `dsize` rule alerts on
+  the data packet.) The alert then has `pcap_cnt` null and a `pkt_src`
   such as "stream (flow timeout)". That's normal, not a defect.
 - **The alert packet isn't the matching packet.** Because data is
   inspected when it's ACKed, or when the stream is flushed, the alert is
   usually logged on a later packet than the one carrying the bytes (an
   ACK, or the FIN exchange). The write-up records both.
-- **One raw match can alert twice.** A rule whose content is on the raw
-  payload (no sticky buffer) on TCP can match on the packet and again on
-  the reassembled stream, so it alerts twice per flow. The same double
-  counting feeds threshold and detection_filter counts: six raw-TCP
-  beacons made 12 matches. Rules on app-layer buffers (`http.*`, `dns.*`,
-  `tls.*`, `file.data`...) match once per transaction, so five HTTP
-  requests count five.
+- **One raw match can alert more than once.** A rule whose content is on
+  the raw payload (no sticky buffer) on TCP can match on the packet and
+  again on the reassembled stream, so it alerts twice per flow. A rule
+  with no content at all (a bare `byte_test`) can add a third alert at
+  flow timeout. The same multiple counting feeds threshold and
+  detection_filter counts: six raw-TCP beacons made 12 matches, and three
+  beacons fired a `count 5` threshold. Rules on app-layer buffers
+  (`http.*`, `dns.*`, `tls.*`, `file.data`...) match once per transaction,
+  so five HTTP requests count five.
 - **Raw content plus app-layer state on to_client may never fire in IDS
   mode.** Examples are `content` with `ssl_state` or `ssl_version`. The
   state is set when the data is parsed, which is a later packet than the

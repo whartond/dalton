@@ -199,6 +199,7 @@ SURICATA8_KEYWORDS = set(
     """.split()
 )
 TO_CLIENT = {"to_client", "from_server"}
+GENERIC_PROTOS = {"tcp", "ip", "any", "pkthdr"}  # may carry HTTP or not
 TO_SERVER = {"to_server", "from_client"}
 # Defaults from Suricata's suricata.yaml; a job's own config may differ.
 DEFAULT_PORT_VARS = {
@@ -495,28 +496,34 @@ def add_unique(items, item):
 
 
 def body_limits(facts):
-    """(side, libhtp setting) for each HTTP body the rule inspects."""
+    """(side, libhtp setting, sure) for each HTTP body the rule inspects.
+
+    sure is False for file.data on a generic proto (tcp, ip, any): it is
+    bounded by libhtp only if the traffic turns out to be HTTP.
+    """
     proto = facts["proto"] or ""
     if proto == "http2":
         return []  # libhtp's limits are for HTTP/1
     buffers = set(facts["buffers"])
     for p in facts["pcre"]:
         # legacy pcre modifiers: P is the request body, Q the response body
-        flags = p["value"].strip('"').rsplit("/", 1)[-1]
+        flags = (p["value"] or "").strip('"').rsplit("/", 1)[-1]
         if "P" in flags:
             buffers.add("http.request_body")
         if "Q" in flags:
             buffers.add("http.response_body")
     http = proto.startswith("http") or any(b.startswith("http") for b in buffers)
+    sure = True
     request = "http.request_body" in buffers
     response = "http.response_body" in buffers
-    if http and buffers & {"file.data", "file_data"}:
+    if buffers & {"file.data", "file_data"} and (http or proto in GENERIC_PROTOS):
         # file.data follows the rule's direction; with none, either body
         flow = set(facts["flow"])
+        sure = http
         request = request or not flow & TO_CLIENT
         response = response or not flow & TO_SERVER
-    return [("request", "request-body-limit")] * request + [
-        ("response", "response-body-limit")
+    return [("request", "request-body-limit", sure)] * request + [
+        ("response", "response-body-limit", sure)
     ] * response
 
 
@@ -580,9 +587,20 @@ def add_notes(facts):
             else:
                 what = f"{count} matching events (an alert every {count} matches)"
             raw = any(c["buffer"] == "payload" for c in facts["contents"])
+            bare = (
+                facts["proto"] == "tcp"
+                and not facts["buffers"]
+                and not any(
+                    o["name"] in ("content", "uricontent", "pcre")
+                    for o in facts["_options"]
+                )
+            )
             twice = (
                 "; a raw content match can count twice (packet and stream)"
                 if raw
+                else "; with no content, one event can count three times on TCP "
+                "(packet, stream and flow timeout)"
+                if bare
                 else ""
             )
             notes.append(
@@ -603,12 +621,13 @@ def add_notes(facts):
                 "encrypts it. pcapkit.tls_flights() defaults to TLS 1.2",
             )
         )
-    for side, limit in body_limits(facts):
+    for side, limit, sure in body_limits(facts):
         notes.append(
             note(
                 "info",
                 "body-limit",
-                f"inspects the HTTP {side} body, which Suricata reads only up to "
+                ("" if sure else "if the traffic is HTTP, file.data ")
+                + f"inspects the HTTP {side} body, which Suricata reads only up to "
                 f"libhtp's {limit}: 100 KiB in the stock suricata.yaml and "
                 "Dalton's default configs, 4 KiB if the key is unset, and "
                 "server-config blocks can override it per address. "
@@ -674,9 +693,9 @@ def add_notes(facts):
             note(
                 "info",
                 "dsize",
-                f"dsize {others['dsize'][0]}: the matching packet's own payload "
-                "must be that size, so the data has to arrive in one segment of "
-                "exactly that length",
+                f"dsize {others['dsize'][0]}: compares the matching packet's own "
+                "payload size, so the data has to arrive in one segment of a "
+                "size that satisfies it",
             )
         )
     if "stream_size" in others:
@@ -718,7 +737,7 @@ def add_notes(facts):
                 "rule, and test lists it in not_loaded",
             )
         )
-    if not any(
+    if "dsize" not in others and not any(
         o["name"] in ("content", "uricontent", "pcre") for o in facts["_options"]
     ):
         notes.append(
@@ -805,15 +824,22 @@ def explain_byte(name, value):
             )
         if name == "byte_jump":
             nbytes, offset = parts[:2]
-            extra = ""
-            for f in flags:
-                if f.startswith("multiplier") or f.startswith("post_offset"):
-                    extra += f"; {f}"
+            extra = "".join(
+                f"; {f}"
+                for f in parts[2:]
+                if f.startswith(("multiplier", "post_offset"))
+            )
+            if "from_beginning" in flags:
+                to = "to that many bytes from the start of the buffer"
+            elif "from_end" in flags:
+                to = "from the end of the buffer by that value"
+            else:
+                to = "that many bytes past the end of the field"
             return (
                 f"byte_jump: reads {nbytes} bytes ({endian}) at offset {offset} "
-                f"{rel}, then moves the cursor that many bytes past the end of "
-                f"the field{extra}. Later relative matches (distance, within) "
-                "count from there, so a negative distance reaches back"
+                f"{rel}, then moves the cursor {to}{extra}. Later relative "
+                "matches (distance, within) count from there, so a negative "
+                "distance reaches back"
             )
         if name == "byte_extract":
             nbytes, offset, var = parts[:3]

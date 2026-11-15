@@ -52,7 +52,7 @@ WAN_HOSTS = {SERVER}  # replies from these cross the internet
 rng = random.Random(SEED)
 
 
-def gap(p, new_flow, prev):
+def gap(p, new_flow, earlier):
     """Seconds between the previous packet and this one. Edit to taste.
 
     The capture point here is the victim's LAN, so WAN_HOSTS are remote. For
@@ -65,7 +65,7 @@ def gap(p, new_flow, prev):
     if UDP in p and p[UDP].sport == 53:
         return rng.uniform(0.004, 0.020)  # resolver answer
     # an RTT for a remote reply; back-to-back segments of one flight are fast
-    return pk.reply_gap(p, prev, WAN_HOSTS, rng)
+    return pk.reply_gap(p, earlier, WAN_HOSTS, rng)
 
 
 def build():

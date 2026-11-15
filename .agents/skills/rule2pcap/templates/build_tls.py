@@ -13,7 +13,9 @@ TLS template, for rules on certificates, SNI, JA3/JA4 or handshake fields.
 The handshake is real: Python's ssl runs both ends in memory, and their
 records are carried verbatim through Flowsynth. A minted cert, an RSA key
 and TLS randoms can't be seeded, so the cert, key and records are cached
-(NAME.crt/.key, session.json). Rebuilds stay byte-identical until --fresh.
+(NAME.crt/.key, session.json). Rebuilds stay byte-identical until an
+input in inputs() changes, or --fresh: then the cert or session is made
+anew. Add anything new the cert or handshake depends on to inputs().
 NAME-keys.log decrypts the capture in Wireshark. The demo fires sid 9000301
 in templates/demo.rules. Copy pcapkit.py next to this file.
 
@@ -30,6 +32,7 @@ layers, or raw bytes).
 """
 
 import datetime
+import hashlib
 import json
 import os
 import random
@@ -51,6 +54,7 @@ VICTIM_MAC, GW_MAC = "f8:bc:12:22:6b:90", "00:1b:54:c2:8e:01"
 SNI = None  # many implants dial an IP and send no SNI; set a name if the rule needs one
 SUBJECT = [("C", "US"), ("O", "Secure Login Ltd"), ("CN", "secure-login.example.org")]
 CERT_START = datetime.datetime(2024, 4, 30, 8, 0, 0, tzinfo=datetime.timezone.utc)
+CERT_DAYS = 365
 
 rng = random.Random(SEED)
 crt, key = os.path.join(here, f"{NAME}.crt"), os.path.join(here, f"{NAME}.key")
@@ -81,19 +85,35 @@ def exchanges():
     return [(request, response)]
 
 
-def gap(p, new_flow, prev):
+def inputs():
+    """Fingerprints of what the cached cert, and the cached session, are made from."""
+    cert = repr((SUBJECT, CERT_START, CERT_DAYS, SEED))
+    session = repr((cert, SNI, exchanges()))
+    return tuple(hashlib.sha256(x.encode()).hexdigest() for x in (cert, session))
+
+
+def gap(p, new_flow, earlier):
     # Capture point on the victim's LAN: the server's replies arrive an RTT
     # later, and back-to-back segments of one flight are fast.
-    return pk.reply_gap(p, prev, {SERVER}, rng, rtt=(0.038, 0.052))
+    return pk.reply_gap(p, earlier, {SERVER}, rng, rtt=(0.038, 0.052))
 
 
 def build(fresh=False):
-    if fresh or not (os.path.exists(crt) and os.path.exists(key)):
+    cert_in, session_in = inputs()
+    saved = {}
+    if os.path.exists(cache):
+        with open(cache) as f:
+            saved = json.load(f).get("inputs", {})
+    if (
+        fresh
+        or saved.get("cert") != cert_in
+        or not (os.path.exists(crt) and os.path.exists(key))
+    ):
         # its own generator, so minting doesn't shift the values drawn from rng
         serial = random.Random(SEED + 1).randrange(1 << 32, 1 << 63)
-        pk.mint_cert(SUBJECT, CERT_START, 365, serial, crt, key)
+        pk.mint_cert(SUBJECT, CERT_START, CERT_DAYS, serial, crt, key)
         fresh = True
-    if fresh or not os.path.exists(cache):
+    if fresh or saved.get("session") != session_in:
         if os.path.exists(keylog):
             os.remove(keylog)
         flights = pk.tls_flights(crt, key, exchanges(), keylog, sni=SNI)
@@ -101,7 +121,11 @@ def build(fresh=False):
             keys = f.read()
         with open(cache, "w") as f:
             json.dump(
-                {"flights": [[d, b.hex()] for d, b in flights], "keylog": keys},
+                {
+                    "inputs": {"cert": cert_in, "session": session_in},
+                    "flights": [[d, b.hex()] for d, b in flights],
+                    "keylog": keys,
+                },
                 f,
                 indent=1,
             )

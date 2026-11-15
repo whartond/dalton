@@ -138,8 +138,33 @@ def test_set_ip_fields_and_reply_gap():
         clone.chksum = None
         assert IP(bytes(clone)).chksum == p[IP].chksum
     remote = {"203.0.113.9"}
-    assert pk.reply_gap(out[1], out[0], remote, rng) >= 0.035  # remote answers local
-    assert pk.reply_gap(out[2], out[1], remote, rng) < 0.001  # local is fast
+    assert pk.reply_gap(out[1], out[:1], remote, rng) >= 0.035  # remote answers local
+    assert pk.reply_gap(out[2], out[:2], remote, rng) < 0.001  # local is fast
+
+
+def test_reply_gap_keeps_a_flight_together_across_local_acks():
+    import random
+
+    from scapy.layers.inet import IP, TCP
+    from scapy.layers.l2 import Ether
+    from scapy.packet import Raw
+
+    pk = pcapkit()
+    rng = random.Random(3)
+
+    def pkt(src, dst, flags, data=b""):
+        sport, dport = (49152, 80) if src == "10.0.0.1" else (80, 49152)
+        p = Ether() / IP(src=src, dst=dst) / TCP(sport=sport, dport=dport, flags=flags)
+        return p / Raw(data) if data else p
+
+    lan, wan = "10.0.0.1", "203.0.113.9"
+    synack, ack = pkt(wan, lan, "SA"), pkt(lan, wan, "A")
+    seg1, seg2 = pkt(wan, lan, "PA", b"a" * 1460), pkt(wan, lan, "PA", b"b")
+    remote = {wan}
+    # a server-first banner after the handshake ACK answers it: an RTT
+    assert pk.reply_gap(seg1, [synack, ack], remote, rng) >= 0.035
+    # the next segment of the same flight doesn't wait for the local ACK
+    assert pk.reply_gap(seg2, [synack, ack, seg1, ack], remote, rng) < 0.001
 
 
 @pytest.mark.skipif(
@@ -236,3 +261,41 @@ def test_tcp_session_keeps_big_messages_inside_the_window(tmp_path):
     wrpcap(str(path), pkts)
     lint = load("pcap_lint").lint(str(path))
     assert "beyond-window" not in {f["code"] for f in lint["findings"]}
+    # after the handshake the window field is scaled, offering about 64 KB
+    from scapy.layers.inet import TCP
+
+    data = [p for p in pkts if TCP in p and "S" not in p[TCP].flags]
+    assert all(p[TCP].window < 1024 for p in data)
+
+
+def test_ipv6_flowsynth_segments_fit_the_mtu(tmp_path):
+    pk = pcapkit()
+    synth = tmp_path / "v6.synth"
+    macs = ("02:00:00:00:00:01", "02:00:00:00:00:02")
+    synth.write_text(
+        pk.flow_line("f", "tcp", "[2001:db8::5]", 49152, "[2001:db8:1::9]", 80, *macs)
+        + pk.event_line("f", ">", b"x" * 5000)
+        + pk.event_line("f", "<", b"y" * 5000)
+    )
+    pk.compile_synth(str(synth), str(tmp_path / "v6.pcap"))
+    lint = load("pcap_lint").lint(str(tmp_path / "v6.pcap"))
+    codes = {f["code"] for f in lint["findings"]}
+    assert not codes & {"jumbo-frame", "over-mss"}, codes
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("cryptography") is None,
+    reason="cryptography not installed",
+)
+def test_tls_template_rebuilds_its_cache_when_an_input_changes(tmp_path):
+    build(tmp_path, "build_tls.py")
+    script = tmp_path / "build.py"
+    text = script.read_text()
+    assert "SNI = None" in text
+    script.write_text(text.replace("SNI = None", 'SNI = "edited.example.org"'))
+    out = subprocess.run(
+        [sys.executable, "-I", "build.py"], cwd=tmp_path, capture_output=True, text=True
+    )
+    assert out.returncode == 0, out.stderr
+    pcap = out.stdout.strip().splitlines()[-1]
+    assert b"edited.example.org" in open(pcap, "rb").read()

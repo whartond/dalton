@@ -328,6 +328,11 @@ def test_double_counting_warning_only_for_raw_content():
         return next(n["message"] for n in rule["notes"] if n["code"] == "threshold")
 
     assert "count twice" in message(raw) and "count twice" not in message(http)
+    bare = one_rule(
+        'alert tcp any any -> any any (msg:"x"; byte_test:1,=,82,0; '
+        "threshold:type threshold,track by_src,count 5,seconds 60; sid:3;)"
+    )
+    assert "three times" in message(bare) and "three times" not in message(http)
 
 
 def test_tls_certificate_note():
@@ -356,6 +361,41 @@ def test_body_limit_note():
     assert limits('file.data; content:"a";', proto="smtp") == []
     assert limits('file.data; content:"a";', proto="http2") == []
     assert limits('http.uri; content:"/a";') == []
+    # file.data on a generic proto is bounded only if the traffic is HTTP
+    tcp = 'flow:established,to_client; file_data; content:"a";'
+    assert limits(tcp, proto="tcp") == response
+    rule = one_rule(f'alert tcp any any -> any any (msg:"x"; {tcp} sid:1;)')
+    (message,) = [n["message"] for n in rule["notes"] if n["code"] == "body-limit"]
+    assert message.startswith("if the traffic is HTTP")
+    assert limits('content:"a";', proto="tcp") == []
+
+
+def test_valueless_pcre_does_not_crash():
+    rule = one_rule('alert tcp any any -> any any (msg:"x"; pcre; sid:20;)')
+    assert rule["sid"] == 20
+
+
+def test_byte_jump_note_follows_where_it_jumps_from():
+    def jump(args):
+        rule = one_rule(
+            f'alert udp any any -> any any (msg:"x"; content:"a"; byte_jump:{args}; '
+            'content:"b"; within:1; sid:1;)'
+        )
+        return next(n["message"] for n in rule["notes"] if n["code"] == "byte_jump")
+
+    assert "past the end of the field" in jump("2,0")
+    assert "from the start of the buffer" in jump("2,0,from_beginning")
+    assert "from the end of the buffer" in jump("2,0,from_end")
+    assert jump("2,0,multiplier 2,post_offset 1").index("multiplier") < jump(
+        "2,0,multiplier 2,post_offset 1"
+    ).index("post_offset")
+
+
+def test_dsize_rule_is_packet_only_and_may_be_a_range():
+    rule = one_rule('alert tcp any any -> any any (msg:"x"; dsize:>100; sid:1;)')
+    notes = {n["code"]: n["message"] for n in rule["notes"]}
+    assert "no-content" not in notes
+    assert "exactly" not in notes["dsize"]
 
 
 def test_malformed_header_is_a_note_not_a_crash():

@@ -151,9 +151,16 @@ def inert_pe(size=4096, e_lfanew=0x80, rng=None, dll=False):
 # --------------------------------------------------------------- flowsynth
 
 
-def flow_line(name, proto, src, sport, dst, dport, src_mac, dst_mac):
-    """A Flowsynth flow declaration with fixed MACs (never Flowsynth's own)."""
-    init = "tcp.initialize; " if proto == "tcp" else ""
+def flow_line(name, proto, src, sport, dst, dport, src_mac, dst_mac, mss=None):
+    """A Flowsynth flow declaration with fixed MACs (never Flowsynth's own).
+
+    TCP data is cut into mss-byte segments: 1460 over IPv4 and 1440 over
+    IPv6 (Flowsynth's own 1460 makes oversized IPv6 frames) unless given.
+    """
+    init = ""
+    if proto == "tcp":
+        mss = mss or (1440 if ":" in src.strip("[]") else 1460)
+        init = f"tcp.initialize; mss:{mss}; "
     return f"flow {name} {proto} {src}:{sport} > {dst}:{dport} ( {init}src_mac:{src_mac}; dst_mac:{dst_mac}; );\n"
 
 
@@ -215,38 +222,63 @@ def rebuild(q, when=None):
     return q
 
 
-def reply_gap(p, prev, remote, rng, rtt=(0.035, 0.060), local=(0.0002, 0.0008)):
+def reply_gap(p, earlier, remote, rng, rtt=(0.035, 0.060), local=(0.0002, 0.0008)):
     """A plausible gap before packet p, seen from a capture point.
 
+    earlier: the packets before p, oldest first (restamp passes them).
     remote: the set of IPs on the far side of the WAN from the capture
     point. A packet from a remote host that answers a local one arrives an
     RTT later; everything else (back-to-back segments of one flight, local
-    replies) is sub-millisecond. If the capture point is near the server
-    (an inbound attack), the remote set is the outside client.
+    replies) is sub-millisecond. Flowsynth ACKs every segment, so a local
+    pure ACK between two remote data segments doesn't count as something
+    answered. If the capture point is near the server (an inbound attack),
+    the remote set is the outside client.
     """
     src = l3(p).src
-    if prev is not None and src in remote and l3(prev).src not in remote:
+    if (
+        earlier
+        and src in remote
+        and l3(earlier[-1]).src not in remote
+        and not continues_flight(p, earlier)
+    ):
         return rng.uniform(*rtt)
     return rng.uniform(*local)
+
+
+def continues_flight(p, earlier):
+    """True if TCP data p follows its sender's own data with only pure ACKs
+    from the other end in between: the same flight, not an answer."""
+    if TCP not in p or not bytes(p[TCP].payload):
+        return False
+    key, src = frozenset(endpoints(p)), l3(p).src
+    for q in reversed(earlier):
+        if TCP not in q or frozenset(endpoints(q)) != key:
+            return False
+        if l3(q).src == src:
+            return bool(bytes(q[TCP].payload)) and not q[TCP].flags.F
+        if bytes(q[TCP].payload) or q[TCP].flags != "A":
+            return False
+    return False
 
 
 def restamp(pkts, start, gap):
     """Replace Flowsynth's wall-clock stamps.
 
-    gap(packet, new_flow, prev) returns the seconds since the previous
-    packet; new_flow is True for the first packet of a flow and prev is the
-    previous packet in the capture (None for the first). The first packet
-    is stamped exactly at start.
+    gap(packet, new_flow, earlier) returns the seconds since the previous
+    packet; new_flow is True for the first packet of a flow and earlier is
+    the list of packets before it in the capture, oldest first
+    (earlier[-1] is the previous one). The first packet is stamped exactly
+    at start.
     """
-    seen, prev = set(), None
+    seen, earlier = set(), []
     t = start.timestamp() if isinstance(start, datetime.datetime) else start
     for p in pkts:
         key = frozenset(endpoints(p))
-        if prev is not None:
-            t += gap(p, key not in seen, prev)
+        if earlier:
+            t += gap(p, key not in seen, earlier)
         seen.add(key)
         p.time = t
-        prev = p
+        earlier.append(p)
 
 
 def randomize_isns(pkts, rng):
@@ -391,14 +423,14 @@ def tcp_session(
 
     messages is a list of (">" or "<", bytes). near says which end the
     capture point sits next to: "client" (an outbound connection seen from
-    the LAN) or "server" (an inbound connection to a local server). A
-    packet from the far end that answers the near end arrives `rtt` later;
+    the LAN) or "server" (an inbound connection to a local server). A packet
+    from the far end that answers the near end arrives `rtt` later;
     everything else is sub-millisecond. Data is segmented at the MSS and
     each message is ACKed. A message bigger than the receiver's window is
-    sent in flights, each ACKed before the next: the window in a SYN isn't
-    scaled, so a peer that has sent only its SYN offers just `window`
-    bytes. The connection ends with a FIN close started by `closer`, or
-    closer=None to leave it open.
+    sent in flights, each ACKed before the next. Each side offers about its
+    host's `window` bytes: as is in its SYN, which is never scaled, and
+    shifted by its WScale in every later packet. The connection ends with a
+    FIN close started by `closer`, or closer=None to leave it open.
     """
     out = []
     far = "<" if near == "client" else ">"
@@ -423,10 +455,17 @@ def tcp_session(
     wscale = {">": 8, "<": 7}  # from copts and sopts
     scaled = {">": False, "<": False}  # has that side sent a non-SYN packet
 
+    def field(side, syn):
+        """The window field: unscaled in a SYN, else shifted by WScale so
+        both offer about `window` bytes."""
+        host = client if side == ">" else server
+        return host.window if syn else max(1, host.window >> wscale[side])
+
     def window(side):
         """Bytes the side is offering to receive."""
-        host = client if side == ">" else server
-        return host.window << wscale[side] if scaled[side] else host.window
+        if not scaled[side]:
+            return field(side, True)
+        return field(side, False) << wscale[side]
 
     def send(at, frm, flags, data=b"", options=None):
         back = "<" if frm == ">" else ">"
@@ -437,7 +476,7 @@ def tcp_session(
             dport=d,
             flags=flags,
             seq=seq[frm] % SEQ_MOD,
-            window=src.window,
+            window=field(frm, "S" in flags),
             options=options or [],
         )
         tcp.ack = seq[back] % SEQ_MOD if "A" in flags else 0

@@ -193,9 +193,13 @@ traffic no real instance would produce.
 
    For a threshold or detection_filter rule, send count + 1 matching
    events, inside the window, from the tracked address. Optionally build a
-   count − 1 variant to show it doesn't fire below the threshold (test it
-   with `--expect-absent <sid>`). Test both with `--set runmode=single`, or
-   the alert lands on a different packet each run.
+   variant below the threshold to show it doesn't fire (test it with
+   `--expect-absent <sid>`). On raw TCP one event can count two or three
+   times (see gotchas.md), so count − 1 events usually still fire: use
+   fewer than count/2 events with content, count/3 without. A `type limit`
+   rule alerts from the first match and has no such variant. Test with
+   `--set runmode=single`, or the alert lands on a different packet each
+   run.
 2. **Pick a template**, copying it to `$OUT/build.py` along with
    `$SKILL/templates/pcapkit.py`:
    - `build_flowsynth.py`: HTTP, DNS, SMTP and most TCP/UDP application
@@ -205,7 +209,9 @@ traffic no real instance would produce.
      interleaved connections (threshold, volume), ICMP and raw IP. For
      repeated HTTP requests (e.g. an HTTP threshold rule), build each
      connection with `pk.http_message()`.
-   - `build_tls.py`: certificate, SNI and TLS-handshake rules.
+   - `build_tls.py`: certificate, SNI and TLS-handshake rules. It caches
+     the cert, key and handshake, and rebuilds them when an input they
+     depend on changes; `--fresh` forces new ones.
 3. **Edit the build:**
    - Set `NAME` and `SEED` (use the target sid), and the start time.
    - Set the hosts, TTLs and ports, following `references/realism.md`.
