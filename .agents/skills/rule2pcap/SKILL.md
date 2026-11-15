@@ -194,10 +194,13 @@ traffic no real instance would produce.
    For a threshold or detection_filter rule, send count + 1 matching
    events, inside the window, from the tracked address. Optionally build a
    variant below the threshold to show it doesn't fire (test it with
-   `--expect-absent <sid>`). On raw TCP one event can count two or three
-   times (see gotchas.md), so count − 1 events usually still fire: use
-   fewer than count/2 events with content, count/3 without. A `type limit`
-   rule alerts from the first match and has no such variant. Test with
+   `--expect-absent <sid>`). On TCP one event can count more than once
+   (see gotchas.md), so count − 1 events often still fire. First find the
+   matches per event: the `threshold` note from `rule_facts.py` gives the
+   usual cause, and a copy of the rule with `count 1` alerts on every
+   match. Then use few enough events that events × matches stays below
+   the count. A `type limit` rule alerts from the first match and has no
+   such variant. Test with
    `--set runmode=single`, or the alert lands on a different packet each
    run.
 2. **Pick a template**, copying it to `$OUT/build.py` along with

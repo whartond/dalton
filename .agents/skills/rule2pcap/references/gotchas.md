@@ -34,11 +34,14 @@ Check this list before changing the traffic.
   the raw payload (no sticky buffer) on TCP can match on the packet and
   again on the reassembled stream, so it alerts twice per flow. A rule
   with no content at all (a bare `byte_test`) can add a third alert at
-  flow timeout. The same multiple counting feeds threshold and
-  detection_filter counts: six raw-TCP beacons made 12 matches, and three
-  beacons fired a `count 5` threshold. Rules on app-layer buffers
-  (`http.*`, `dns.*`, `tls.*`, `file.data`...) match once per transaction,
-  so five HTTP requests count five.
+  flow timeout. A TCP rule with nothing to inspect in the payload (`flow`
+  and header keywords only) matches every packet in its direction, ACKs
+  and FINs included; `dsize` and `flags` rules match single packets once.
+  On UDP each packet counts once. The same multiple counting feeds
+  threshold and detection_filter counts: six raw-TCP beacons made 12
+  matches, and three beacons fired a `count 5` threshold. Rules on
+  app-layer buffers (`http.*`, `dns.*`, `tls.*`, `file.data`...) match
+  once per transaction, so five HTTP requests count five.
 - **Raw content plus app-layer state on to_client may never fire in IDS
   mode.** Examples are `content` with `ssl_state` or `ssl_version`. The
   state is set when the data is parsed, which is a later packet than the

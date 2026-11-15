@@ -110,6 +110,8 @@ def test_dns_messages_aaaa_and_nxdomain():
     _, reply = pk.dns_messages(7, "a.example", "2001:db8::5", qtype="AAAA")
     dns = DNS(reply)
     assert dns.ancount == 1 and dns.an[0].rdata == "2001:db8::5"
+    with pytest.raises(ValueError):
+        pk.dns_messages(7, "a.example", "192.0.2.1", qtype="AAAA")
     _, reply = pk.dns_messages(7, "nope.example", rcode=3)
     dns = DNS(reply)
     assert dns.rcode == 3 and dns.ancount == 0
@@ -299,3 +301,20 @@ def test_tls_template_rebuilds_its_cache_when_an_input_changes(tmp_path):
     assert out.returncode == 0, out.stderr
     pcap = out.stdout.strip().splitlines()[-1]
     assert b"edited.example.org" in open(pcap, "rb").read()
+
+
+@pytest.mark.parametrize("window", [1000, 262144])
+def test_tcp_session_handles_small_and_large_windows(tmp_path, window):
+    import random
+
+    from scapy.utils import wrpcap
+
+    pk = pcapkit()
+    client = pk.Host("10.0.0.5", "02:00:00:00:00:01", window=window)
+    server = pk.Host("203.0.113.9", "02:00:00:00:00:02", ttl=52, window=window)
+    msgs = [(">", b"x" * 20_000), ("<", b"y" * 20_000)]
+    pkts, _ = pk.tcp_session(1000.0, client, server, 49152, 80, msgs, random.Random(1))
+    path = tmp_path / "w.pcap"
+    wrpcap(str(path), pkts)
+    lint = load("pcap_lint").lint(str(path))
+    assert "beyond-window" not in {f["code"] for f in lint["findings"]}

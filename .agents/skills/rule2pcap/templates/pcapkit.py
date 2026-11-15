@@ -47,10 +47,16 @@ QTYPES = {"A": 1, "NS": 2, "CNAME": 5, "SOA": 6, "MX": 15, "TXT": 16, "AAAA": 28
 def dns_messages(txid, name, addr=None, ttl=300, qtype="A", rcode=0):
     """A DNS query and its response, as UDP payloads.
 
-    qtype "A" or "AAAA" with addr gives one answer record. addr=None gives
-    an empty answer: NODATA with rcode=0, or NXDOMAIN with rcode=3.
+    qtype "A" with an IPv4 addr, or "AAAA" with an IPv6 one, gives one
+    answer record. addr=None gives an empty answer: NODATA with rcode=0, or
+    NXDOMAIN with rcode=3. Other answer types aren't built here.
     """
     import ipaddress
+
+    if addr is not None:
+        version = ipaddress.ip_address(addr).version
+        if (qtype, version) not in (("A", 4), ("AAAA", 6)):
+            raise ValueError(f"qtype {qtype} can't answer with {addr}")
 
     qname = b"".join(bytes([len(p)]) + p.encode() for p in name.split(".")) + b"\0"
     question = qname + struct.pack(">HH", QTYPES[qtype], 1)
@@ -231,7 +237,9 @@ def reply_gap(p, earlier, remote, rng, rtt=(0.035, 0.060), local=(0.0002, 0.0008
     RTT later; everything else (back-to-back segments of one flight, local
     replies) is sub-millisecond. Flowsynth ACKs every segment, so a local
     pure ACK between two remote data segments doesn't count as something
-    answered. If the capture point is near the server (an inbound attack),
+    answered. The reverse can't be fixed by timing alone: each remote ACK
+    of a local multi-segment send still costs an RTT, so a big upload from
+    the near side is slow. Build those with tcp_session instead. If the capture point is near the server (an inbound attack),
     the remote set is the outside client.
     """
     src = l3(p).src
@@ -459,7 +467,9 @@ def tcp_session(
         """The window field: unscaled in a SYN, else shifted by WScale so
         both offer about `window` bytes."""
         host = client if side == ">" else server
-        return host.window if syn else max(1, host.window >> wscale[side])
+        if syn:
+            return min(host.window, 0xFFFF)  # a SYN's field isn't scaled
+        return max(1, min(host.window >> wscale[side], 0xFFFF))
 
     def window(side):
         """Bytes the side is offering to receive."""
@@ -501,17 +511,20 @@ def tcp_session(
     for frm, data in messages:
         back = "<" if frm == ">" else ">"
         t += step(frm)
-        flight = 0
-        for i in range(0, len(data), mss):
-            segment = data[i : i + mss]
-            if flight and flight + len(segment) > window(back):
+        flight, i = 0, 0
+        while i < len(data):
+            room = window(back) - flight
+            if room <= 0:
                 # window full: wait for the receiver's ACK
                 t += step(back)
                 send(t, back, "A")
                 t += step(frm)
                 flight = 0
+                continue
+            segment = data[i : i + min(mss, room)]
             send(t, frm, "PA", segment)
             flight += len(segment)
+            i += len(segment)
             t += 0.00004
         t += step(back)
         send(t, back, "A")

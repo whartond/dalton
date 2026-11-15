@@ -334,6 +334,20 @@ def test_double_counting_warning_only_for_raw_content():
     )
     assert "three times" in message(bare) and "three times" not in message(http)
 
+    def note_for(options, proto="tcp"):
+        return message(
+            one_rule(
+                f'alert {proto} any any -> any any (msg:"x"; {options} '
+                "threshold:type threshold,track by_src,count 5,seconds 60; sid:4;)"
+            )
+        )
+
+    assert "every packet" in note_for("flow:established,to_server;")
+    assert "counts" not in note_for("flags:S;") and "count t" not in note_for(
+        "dsize:>0;"
+    )
+    assert "count twice" not in note_for('content:"a";', proto="udp")
+
 
 def test_tls_certificate_note():
     rule = one_rule(

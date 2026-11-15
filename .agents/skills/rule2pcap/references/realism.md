@@ -27,7 +27,9 @@ client would plausibly send, and list it in the write-up.
 - Capture point: assume the sensor sits on the inside host's LAN. The
   outside host's replies arrive an RTT after what they answer; back-to-back
   segments of one flight, and local replies, are sub-millisecond
-  (`pcapkit.reply_gap()`). For an inbound attack on a local server, the
+  (`pcapkit.reply_gap()`). Flowsynth ACKs every segment, so a large send
+  from the inside host gets an RTT per segment; build one with
+  `pcapkit.tcp_session()`. For an inbound attack on a local server, the
   outside client is the remote end (`tcp_session(near="server")`).
 
 ## Names
