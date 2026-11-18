@@ -289,6 +289,7 @@ def new_flow(proto, client, server):
         # right edge of the receive window each side last offered
         "edge": {"c": None, "s": None},
         "data_before_handshake": None,
+        "bare_syn": False,
         "first_frame": None,
     }
 
@@ -314,6 +315,8 @@ def track_tcp(out, flows, frame, ts, ip, tcp):
             flow["synack"] = True
         else:
             flow["syn"] = True
+        if not tcp.options:
+            flow["bare_syn"] = True
         for opt in tcp.options or []:
             if opt[0] == "MSS":
                 flow["mss"][side] = opt[1]
@@ -388,6 +391,16 @@ def track_tcp(out, flows, frame, ts, ip, tcp):
 
 
 def finish_flows(out, flows):
+    for flow in flows.values():
+        if flow["proto"] == "tcp" and flow["bare_syn"]:
+            out.add(
+                "warning",
+                "bare-syn",
+                "TCP flow opens with a SYN or SYN/ACK that has no options; "
+                "every real stack sends at least MSS (Flowsynth's default). "
+                "Use pcapkit.set_tcp_stack()",
+                flow["first_frame"],
+            )
     for flow in flows.values():
         if flow["proto"] != "tcp":
             continue

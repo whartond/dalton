@@ -48,6 +48,13 @@ VICTIM_MAC, RESOLVER_MAC, GW_MAC = (
 )
 HOST = "updates.example.net"
 WAN_HOSTS = {SERVER}  # replies from these cross the internet
+RTT = (0.035, 0.060)  # internet round trip range, seconds
+# Each TCP host's OS: its SYN options, windows and timestamps
+# (pk.set_tcp_stack). Flowsynth's own are window 8192 and no options.
+STACKS = {VICTIM: "windows", SERVER: "linux"}
+# Segment size: when both ends use timestamps (Linux, macOS), each segment
+# carries a 12-byte option, so data segments are 12 bytes smaller.
+SEGMENT = 1448 if pk.both_timestamp(STACKS[VICTIM], STACKS[SERVER]) else None
 
 rng = random.Random(SEED)
 
@@ -65,7 +72,7 @@ def gap(p, new_flow, earlier):
     if UDP in p and p[UDP].sport == 53:
         return rng.uniform(0.004, 0.020)  # resolver answer
     # an RTT for a remote reply; back-to-back segments of one flight are fast
-    return pk.reply_gap(p, earlier, WAN_HOSTS, rng)
+    return pk.reply_gap(p, earlier, WAN_HOSTS, rng, rtt=RTT)
 
 
 def build():
@@ -108,14 +115,20 @@ def build():
         )
         f.write(pk.event_line("d", ">", query) + pk.event_line("d", "<", answer))
         f.write(
-            pk.flow_line("h", "tcp", VICTIM, http_port, SERVER, 80, VICTIM_MAC, GW_MAC)
+            pk.flow_line(
+                "h", "tcp", VICTIM, http_port, SERVER, 80, VICTIM_MAC, GW_MAC, SEGMENT
+            )
         )
         f.write(pk.event_line("h", ">", request) + pk.event_line("h", "<", response))
     pk.compile_synth(synth, pcap)
 
     pkts = pk.randomize_isns(list(rdpcap(pcap)), rng)
     pk.restamp(pkts, START, gap)
-    pkts = pk.teardown(pkts, closer="client")
+    # idle: how long before the closer sends its FIN (see pk.teardown)
+    pkts = pk.teardown(
+        pkts, closer="client", idle=0.2, remote=WAN_HOSTS, rtt=RTT, rng=rng
+    )
+    pkts = pk.set_tcp_stack(pkts, STACKS, rng)
     # TTLs as seen at the capture point (local Windows 128, remote a few hops
     # down) and per-host IP IDs; Flowsynth stamps TTL 64 and ID 1 everywhere.
     pkts = pk.set_ip_fields(pkts, rng, ttl={VICTIM: 128, RESOLVER: 64, SERVER: 52})

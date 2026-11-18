@@ -13,13 +13,15 @@ the family, exploit or tool.
 ## Sources, in rough order
 
 1. **Rulesets the Dalton host already has.** `dalton_client.py preflight`
-   lists Dalton's prod rulesets (e.g. ET). The paths it prints are inside
-   Dalton's controller container. Dalton's API can't search them, so:
-   - On the machine running Dalton in Docker:
-     `docker exec dalton_controller grep -h -i PATTERN /opt/dalton/rulesets/suricata/*.rules`
-   - Or grep the `rulesets/` directory of the Dalton checkout that's
-     running (it's bind-mounted into the container). That isn't
-     necessarily the checkout holding this skill.
+   lists Dalton's prod rulesets (e.g. ET). The paths in `prod_rulesets` are
+   inside Dalton's controller container, and Dalton's API can't search
+   them. When Dalton runs in Docker on this machine, preflight also prints
+   `prod_rulesets_on_host`:
+   - `host_dir`: the same files on this machine; grep them there.
+   - `container`: if there's no `host_dir`, grep inside it:
+     `docker exec <container> grep -h -i PATTERN /opt/dalton/rulesets/suricata/*.rules`
+
+   Without either, ask the user where the rulesets are.
 
    Grep for the family, CVE or distinctive bytes. Other vendors' rules for
    the same threat often carry the real bytes, md5 references to samples,

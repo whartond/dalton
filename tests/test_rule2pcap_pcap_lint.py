@@ -26,6 +26,8 @@ def pkt(src, dst, flags, seq, ack, data=b"", sport=49152, dport=80):
         / IP(src=src, dst=dst, id=next(IP_IDS), ttl=128 if src == CLIENT else 52)
         / TCP(sport=sport, dport=dport, flags=flags, seq=seq, ack=ack)
     )
+    if "S" in flags:
+        p[TCP].options = [("MSS", 1460)]
     if data:
         p = p / Raw(data)
     return p
@@ -201,3 +203,11 @@ def test_data_past_the_receive_window(tmp_path):
     assert "beyond-window" in codes(pl.lint(write(tmp_path, stamp(pkts))))
     pkts[1][TCP].window = 1200
     assert "beyond-window" not in codes(pl.lint(write(tmp_path, stamp(pkts), "y.pcap")))
+
+
+def test_syn_without_options_is_flagged(tmp_path):
+    pkts = stamp(session())
+    pkts[0][TCP].options = []
+    result = pl.lint(write(tmp_path, pkts))
+    (bare,) = [f for f in result["findings"] if f["code"] == "bare-syn"]
+    assert bare["level"] == "warning" and bare["frames"] == [1]

@@ -29,13 +29,18 @@ Set these once, as absolute paths, and use them in every command:
   directory).
 - `VENV`: the build venv, by default `$WORK/.venv-rule2pcap`. Call its Python
   by absolute path; a relative path through `..` makes Python 3.14 print
-  `sys.prefix` warnings.
+  `sys.prefix` warnings. Don't resolve its symlinks (`realpath`): that
+  leads to the system Python, without the venv's packages.
 - `OUT`: the deliverable directory, `$WORK/rule2pcap-output/<suggested_dir>`.
-  `rule_facts.py` prints `suggested_dir` as `<sid>-<slug>`, where the slug is
-  the msg lowercased with non-alphanumerics turned into `-`, at most 40
-  characters. If the user names another location, use that.
+  `rule_facts.py` prints a top-level `suggested_dir` as `<sid>-<slug>`,
+  where the slug is the msg lowercased with non-alphanumerics turned into
+  `-`, at most 40 characters. It's named for the rule the pcap must fire,
+  not a `noalert` setter; if several rules can alert, it uses the first,
+  and each rule has its own `suggested_dir` if the target is another. If
+  the user names another location, use that.
 
-Run commands from `$OUT` once it exists. Every script prints JSON. Keep raw
+Steps 1 and 2.1 run in `$WORK/rule2pcap-output/`, before `$OUT` exists;
+run everything after that from `$OUT`. Every script prints JSON. Keep raw
 script output, such as test results, in `$WORK/rule2pcap-output/logs/`
 (create it first), not in `$OUT`.
 
@@ -111,13 +116,13 @@ exploit or malware, say once that a pcap built from the rule begs the
 question; a capture of the real traffic is the test for that. This pcap
 checks the rule's syntax and structure. Then carry on if they still want it.
 
-Save the rules to `$WORK/rule2pcap-output/test.rules`, then run
-`rule_facts.py` (step 2) to get `suggested_dir`. Create `$OUT`, and move
-`test.rules` into it.
+Save the rules to `$WORK/rule2pcap-output/test.rules`, and run step 2.1
+in that directory: it prints `suggested_dir`. Then create `$OUT`, move
+`test.rules` into it, and `cd` there for the rest.
 
 ## 2. Read the rule
 
-1. **Decode it:**
+1. **Decode it** (in `$WORK/rule2pcap-output/`, as step 1 says):
    ```
    $VENV/bin/python $SKILL/scripts/rule_facts.py test.rules
    ```
@@ -132,7 +137,7 @@ Save the rules to `$WORK/rule2pcap-output/test.rules`, then run
    out the arithmetic.
 2. **Load it in the engines:**
    ```
-   $VENV/bin/python $SKILL/scripts/dalton_client.py validate --rules test.rules
+   $VENV/bin/python $SKILL/scripts/dalton_client.py validate --rules test.rules > $WORK/rule2pcap-output/logs/validate.json
    ```
    This submits a short Dalton job per engine, taking tens of seconds.
    Suricata is the judge of whether a rule is well-formed. Reading the
@@ -211,7 +216,10 @@ traffic no real instance would produce.
      depend on changes; `--fresh` forces new ones.
 3. **Edit the build:**
    - Set `NAME` and `SEED` (use the target sid), and the start time.
-   - Set the hosts, TTLs and ports, following `references/realism.md`.
+   - Set the hosts, their OS (`STACKS`, or `Host(stack=...)` in scapy),
+     TTLs and ports, following `references/realism.md`.
+   - Set the timing: the RTT range, and the `idle` before each close
+     (`pk.teardown()` says what's typical).
    - Replace the demo payloads.
    - Delete the template-notes block.
    - Fill in the docstring's provenance.
@@ -235,8 +243,8 @@ $VENV/bin/python $SKILL/scripts/dalton_client.py test --pcap <name>.pcap --rules
     `noalert`. Use `--expect-sid` to narrow that, and `--expect-absent`
     for a sid that must not fire (a below-threshold or near-miss pcap).
   - Per engine, `expected_fired` says which fired, `alert_lines` holds the
-    engine's own alert lines for the write-up, and `first` gives the packet
-    the first alert landed on.
+    engine's own alert lines for the write-up, `first` gives the packet
+    the first alert landed on, and `frames` lists every alert's frame.
   - A null `pcap_cnt` with a `pkt_src` like "stream (flow timeout)" means
     a pseudo-packet; see gotchas.
 - **Engines that can't load the rule:** `not_loaded` lists them, typically

@@ -35,6 +35,7 @@ import http.cookiejar
 import io
 import json
 import os
+import posixpath
 import re
 import shlex
 import shutil
@@ -326,6 +327,8 @@ def parse_eve(text):
     return events
 
 
+MAX_FRAMES = 50  # alert frames listed per sid
+
 FAST_RE = re.compile(r"\[\*\*\]\s*\[(\d+):(\d+):(\d+)\]\s*(.*?)\s*\[\*\*\]")
 
 
@@ -339,9 +342,18 @@ def summarise(events, fast_text=None):
             sid = str(alert.get("signature_id"))
             entry = fired.setdefault(
                 sid,
-                {"count": 0, "msg": alert.get("signature"), "first": None},
+                {
+                    "count": 0,
+                    "msg": alert.get("signature"),
+                    "first": None,
+                    "frames": [],
+                },
             )
             entry["count"] += 1
+            if len(entry["frames"]) < MAX_FRAMES:
+                # the frame number, or the pseudo-packet's source when the
+                # alert landed on one (pcap_cnt null)
+                entry["frames"].append(ev.get("pcap_cnt") or ev.get("pkt_src"))
             if entry["first"] is None:
                 entry["first"] = {
                     "pcap_cnt": ev.get("pcap_cnt"),
@@ -358,7 +370,8 @@ def summarise(events, fast_text=None):
     if not events and fast_text:
         for m in FAST_RE.finditer(fast_text):
             entry = fired.setdefault(
-                m.group(2), {"count": 0, "msg": m.group(4), "first": None}
+                m.group(2),
+                {"count": 0, "msg": m.group(4), "first": None, "frames": []},
             )
             entry["count"] += 1
     return fired, anomalies
@@ -844,6 +857,49 @@ def cmd_validate(args):
     return 0 if report["valid"] else 1
 
 
+def ruleset_locations(paths):
+    """Where Dalton's prod rulesets are on this machine, for grepping.
+
+    The API gives paths inside Dalton's controller container. If that
+    container runs on this host, map each path through its bind mounts.
+    Returns {"container": name, "host_dir": dir or None} or None.
+    """
+    if not paths or not shutil.which("docker"):
+        return None
+    try:
+        ids = subprocess.run(
+            ["docker", "ps", "-q"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=True,
+        ).stdout.split()
+        if not ids:
+            return None
+        info = json.loads(
+            subprocess.run(
+                ["docker", "inspect", *ids],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=True,
+            ).stdout
+        )
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return None
+    folder = posixpath.dirname(paths[0])
+    for c in info:
+        for m in c.get("Mounts") or []:
+            dest = (m.get("Destination") or "").rstrip("/")
+            if not dest or not (folder == dest or folder.startswith(dest + "/")):
+                continue
+            host = None
+            if m.get("Type") == "bind" and m.get("Source"):
+                host = m["Source"].rstrip("/") + folder[len(dest) :]
+            return {"container": c.get("Name", "").lstrip("/"), "host_dir": host}
+    return None
+
+
 def cmd_preflight(args):
     report = {"dalton": {}, "docker": {}, "build_env": check_python(args.python)}
     client = client_from_env(args)
@@ -862,6 +918,10 @@ def cmd_preflight(args):
         d["reachable"], d["auth"] = True, "ok"
         try:
             d["prod_rulesets"] = client.prod_rulesets(args.engine)
+            where = ruleset_locations(d["prod_rulesets"])
+            if where:
+                # grep these, not the paths above (they're inside the container)
+                d["prod_rulesets_on_host"] = where
         except DaltonError as exc:
             d["prod_rulesets"], d["prod_rulesets_error"] = [], str(exc)
     except AuthRequired as exc:

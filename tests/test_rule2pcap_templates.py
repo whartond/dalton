@@ -318,3 +318,133 @@ def test_tcp_session_handles_small_and_large_windows(tmp_path, window):
     wrpcap(str(path), pkts)
     lint = load("pcap_lint").lint(str(path))
     assert "beyond-window" not in {f["code"] for f in lint["findings"]}
+
+
+def flowsynth_flow(tmp_path, pk, mss=None, size=5000):
+    synth = tmp_path / "f.synth"
+    macs = ("02:00:00:00:00:01", "02:00:00:00:00:02")
+    synth.write_text(
+        pk.flow_line("f", "tcp", "10.0.0.5", 49152, "203.0.113.9", 80, *macs, mss)
+        + pk.event_line("f", ">", b"x" * size)
+        + pk.event_line("f", "<", b"y" * size)
+    )
+    pk.compile_synth(str(synth), str(tmp_path / "f.pcap"))
+    from scapy.utils import rdpcap
+
+    return list(rdpcap(str(tmp_path / "f.pcap")))
+
+
+def test_set_tcp_stack_gives_flowsynth_real_options(tmp_path):
+    import random
+
+    from scapy.layers.inet import TCP
+    from scapy.utils import wrpcap
+
+    pk = pcapkit()
+    stacks = {"10.0.0.5": "linux", "203.0.113.9": "linux"}
+    assert pk.both_timestamp("linux", "linux")
+    # full 1460-byte segments leave no room for the timestamp option
+    with pytest.raises(ValueError, match="mss=1448"):
+        pk.set_tcp_stack(flowsynth_flow(tmp_path, pk), stacks, random.Random(1))
+    pkts = flowsynth_flow(tmp_path, pk, mss=1448)
+    pkts = pk.teardown(pkts, closer="client")
+    pkts = pk.set_tcp_stack(pkts, stacks, random.Random(1))
+    syn, synack = pkts[0][TCP], pkts[1][TCP]
+    assert [o[0] for o in syn.options] == [
+        "MSS",
+        "SAckOK",
+        "Timestamp",
+        "NOP",
+        "WScale",
+    ]
+    assert dict(syn.options)["MSS"] == 1460 and syn.window == 64240
+    assert synack.window == 65160
+    # the SYN/ACK echoes the SYN's timestamp; later packets echo the peer's
+    assert dict(synack.options)["Timestamp"][1] == dict(syn.options)["Timestamp"][0]
+    rest = [p[TCP] for p in pkts[2:]]
+    assert all(t.window == 502 and dict(t.options).get("Timestamp") for t in rest)
+    path = tmp_path / "out.pcap"
+    wrpcap(str(path), pkts)
+    codes = {f["code"] for f in load("pcap_lint").lint(str(path))["findings"]}
+    assert not codes & {"bare-syn", "jumbo-frame", "over-mss", "beyond-window"}, codes
+
+
+def test_set_tcp_stack_without_timestamps_on_one_side(tmp_path):
+    import random
+
+    from scapy.layers.inet import TCP
+
+    pk = pcapkit()
+    pkts = flowsynth_flow(tmp_path, pk)
+    stacks = {"10.0.0.5": "windows", "203.0.113.9": "linux"}
+    pkts = pk.set_tcp_stack(pkts, stacks, random.Random(1))
+    syn, synack = pkts[0][TCP], pkts[1][TCP]
+    assert [o[0] for o in syn.options] == [
+        "MSS",
+        "NOP",
+        "WScale",
+        "NOP",
+        "NOP",
+        "SAckOK",
+    ]
+    # Linux answers a SYN without timestamps in its other option order
+    assert [o[0] for o in synack.options] == pk.STACKS["linux"]["options_nots"]
+    later = [p[TCP] for p in pkts[2:]]
+    assert all(not t.options for t in later)
+    assert {t.window for t in later if t.sport == 49152} == {513}
+
+
+def test_tcp_session_with_stacks_fits_timestamps_in_the_mtu(tmp_path):
+    import random
+
+    from scapy.utils import wrpcap
+
+    pk = pcapkit()
+    client = pk.Host("10.0.0.5", "02:00:00:00:00:01", stack="macos")
+    server = pk.Host("203.0.113.9", "02:00:00:00:00:02", ttl=52, stack="linux")
+    msgs = [(">", b"x" * 100_000), ("<", b"y" * 300_000)]
+    t = 1_700_000_000.0
+    pkts, _ = pk.tcp_session(t, client, server, 49152, 80, msgs, random.Random(1))
+    path = tmp_path / "s.pcap"
+    wrpcap(str(path), pkts)
+    codes = {f["code"] for f in load("pcap_lint").lint(str(path))["findings"]}
+    assert not codes, codes
+
+
+def test_teardown_with_remote_hosts_and_an_rtt_range():
+    import random
+
+    from scapy.layers.inet import IP, TCP
+    from scapy.layers.l2 import Ether
+
+    pk = pcapkit()
+
+    def flow(server):
+        syn = (
+            Ether()
+            / IP(src="10.0.0.5", dst=server)
+            / TCP(sport=49152, dport=80, flags="S", seq=1)
+        )
+        ack = (
+            Ether()
+            / IP(src=server, dst="10.0.0.5")
+            / TCP(sport=80, dport=49152, flags="SA", ack=2)
+        )
+        syn, ack = Ether(bytes(syn)), Ether(bytes(ack))
+        syn.time, ack.time = 1000.0, 1000.05
+        return [syn, ack]
+
+    # a flow with no remote end closes at LAN speed
+    lan = pk.teardown(flow("10.0.0.9"), remote={"203.0.113.9"})
+    assert float(lan[-1].time - lan[2].time) < 0.002
+    with pytest.raises(ValueError):
+        pk.teardown(flow("203.0.113.9"), rtt=(0.03, 0.05))
+    wan = pk.teardown(
+        flow("203.0.113.9"),
+        closer="client",
+        remote={"203.0.113.9"},
+        rtt=(0.03, 0.05),
+        rng=random.Random(1),
+    )
+    fin, ack = wan[2], wan[3]
+    assert 0.03 <= float(ack.time - fin.time) <= 0.05

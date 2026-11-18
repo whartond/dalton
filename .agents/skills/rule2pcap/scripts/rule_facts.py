@@ -570,10 +570,7 @@ def add_notes(facts):
                 "Test with 'alert' if that matters",
             )
         )
-    noalert = "noalert" in facts["other_keywords"] or any(
-        fb["command"] == "noalert" for fb in facts["flowbits"]
-    )
-    if noalert:
+    if is_noalert(facts):
         notes.append(
             note(
                 "info",
@@ -902,6 +899,12 @@ def cross_rule_notes(rules):
     return notes
 
 
+def is_noalert(facts):
+    return "noalert" in facts["other_keywords"] or any(
+        fb["command"] == "noalert" for fb in facts["flowbits"]
+    )
+
+
 def facts_for_text(text):
     rules, disabled = [], 0
     for line in join_continuations(text).splitlines():
@@ -919,6 +922,21 @@ def facts_for_text(text):
         facts.pop("_options", None)
         rules.append(facts)
     result = {"rules": rules, "notes": cross_rule_notes(rules)}
+    # the file's output directory is named for the rule the pcap must fire:
+    # a setter marked noalert only supports it
+    alerting = [r for r in rules if not is_noalert(r)] or rules
+    if alerting:
+        result["suggested_dir"] = alerting[0]["suggested_dir"]
+    if len(alerting) > 1:
+        result["notes"].append(
+            note(
+                "info",
+                "several-targets",
+                f"{len(alerting)} rules can alert; the top-level suggested_dir "
+                f"uses the first (sid {alerting[0]['sid']}). If another is the "
+                "target, use its suggested_dir",
+            )
+        )
     if disabled:
         result["notes"].append(
             note("info", "disabled", f"skipped {disabled} commented-out rule(s)")

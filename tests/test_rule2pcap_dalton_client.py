@@ -246,7 +246,56 @@ def test_summarise_eve_and_fast_fallback():
         "11/14/2026-01:02:03.000000  [**] [1:42:3] TEST fast [**] [Classification: x]"
     )
     fired, _ = dc.summarise([], fast)
-    assert fired == {"42": {"count": 1, "msg": "TEST fast", "first": None}}
+    assert fired == {
+        "42": {"count": 1, "msg": "TEST fast", "first": None, "frames": []}
+    }
+
+
+def test_summarise_lists_every_alert_frame():
+    events = [
+        {"event_type": "alert", "pcap_cnt": 4, "alert": {"signature_id": 7}},
+        {
+            "event_type": "alert",
+            "pcap_cnt": None,
+            "pkt_src": "stream (flow timeout)",
+            "alert": {"signature_id": 7},
+        },
+    ]
+    fired, _ = dc.summarise(events)
+    assert fired["7"]["count"] == 2
+    assert fired["7"]["frames"] == [4, "stream (flow timeout)"]
+
+
+def test_ruleset_locations_maps_bind_mounts(monkeypatch):
+    inspect = [
+        {
+            "Name": "/other",
+            "Mounts": [{"Type": "bind", "Source": "/x", "Destination": "/data"}],
+        },
+        {
+            "Name": "/dalton_controller",
+            "Mounts": [
+                {
+                    "Type": "bind",
+                    "Source": "/home/u/dalton/rulesets",
+                    "Destination": "/opt/dalton/rulesets",
+                }
+            ],
+        },
+    ]
+
+    def fake_run(cmd, **kw):
+        out = "a1\nb2\n" if cmd[:2] == ["docker", "ps"] else dc.json.dumps(inspect)
+        return dc.subprocess.CompletedProcess(cmd, 0, stdout=out)
+
+    monkeypatch.setattr(dc.shutil, "which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr(dc.subprocess, "run", fake_run)
+    where = dc.ruleset_locations(["/opt/dalton/rulesets/suricata/et.rules"])
+    assert where == {
+        "container": "dalton_controller",
+        "host_dir": "/home/u/dalton/rulesets/suricata",
+    }
+    assert dc.ruleset_locations(["/elsewhere/et.rules"]) is None
 
 
 def test_apply_sets_edits_nested_keys():

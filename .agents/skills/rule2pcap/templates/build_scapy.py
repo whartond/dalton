@@ -43,8 +43,9 @@ rng = random.Random(SEED)
 
 # The capture point is on the victim's LAN: a remote host is seen through
 # the gateway's MAC, with a TTL that has dropped a few hops.
-victim = pk.Host("192.168.40.23", "f8:bc:12:61:9a:d4", ttl=128, window=64240)
-c2 = pk.Host("203.0.113.44", "00:1b:54:c2:8e:01", ttl=49, window=29200)
+# stack gives each host its OS's TCP options, windows and timestamps.
+victim = pk.Host("192.168.40.23", "f8:bc:12:61:9a:d4", ttl=128, stack="windows")
+c2 = pk.Host("203.0.113.44", "00:1b:54:c2:8e:01", ttl=49, stack="linux")
 
 
 def beacon(n):

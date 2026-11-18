@@ -407,3 +407,20 @@ def test_pkt_data_resets_to_payload():
         'pkt_data; content:"raw"; sid:1;)'
     )
     assert [c["buffer"] for c in rule["contents"]] == ["http.uri", "payload"]
+
+
+def test_suggested_dir_for_a_file_is_the_rule_that_alerts():
+    setter = (
+        'alert http any any -> any any (msg:"Setter"; flow:established,to_server; '
+        'http.uri; content:"/x"; flowbits:set,b; flowbits:noalert; sid:1;)'
+    )
+    target = (
+        'alert http any any -> any any (msg:"Target"; flow:established,to_client; '
+        'file_data; content:"MZ"; flowbits:isset,b; sid:2;)'
+    )
+    result = facts(setter + "\n" + target)
+    assert result["suggested_dir"] == "2-target"
+    assert "several-targets" not in {n["code"] for n in result["notes"]}
+    both = facts(target + "\n" + target.replace("sid:2", "sid:3"))
+    assert both["suggested_dir"] == "2-target"
+    assert "several-targets" in {n["code"] for n in both["notes"]}

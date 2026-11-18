@@ -21,7 +21,9 @@ client would plausibly send, and list it in the write-up.
 - TTLs: Windows starts at 128 and Linux at 64. A remote host's packets
   arrive a few hops lower (49, 52, 116...). Flowsynth stamps TTL 64 and IP
   ID 1 on everything; fix both with `pcapkit.set_ip_fields()`, run last.
-  Use the TCP window and options of the claimed OS.
+  Use the TCP window and options of the claimed OS: `pcapkit.STACKS` has
+  Windows, Linux and macOS (`set_tcp_stack()` for Flowsynth output,
+  `Host(stack=...)` for `tcp_session()`).
 - Client ports: Windows uses 49152-65535 and Linux 32768-60999
   (`pcapkit.WINDOWS_PORTS`, `pcapkit.LINUX_PORTS`).
 - Capture point: assume the sensor sits on the inside host's LAN. The
@@ -53,6 +55,11 @@ client would plausibly send, and list it in the write-up.
 
 - **Round trips:** LAN replies arrive in under a millisecond. Internet
   round trips take 20 to 150 ms. A resolver takes a few ms to tens of ms.
+  Use one RTT range for the whole build, closes included.
+- **Closes:** a client closes soon after it's done; a server closes an
+  idle keep-alive connection after its timeout (often 5 to 60 s), and a
+  `Connection: close` response right away. Set `teardown()`'s `idle` to
+  match. An alert on the last data of a flow can wait for the close.
 - **Beacons:** sleep plus jitter as the family does, e.g. 60 s ±20%.
   Don't send beacons back to back unless the rule is about a burst.
 - **Dates:** match the threat's era. Keep HTTP `Date:` headers,
