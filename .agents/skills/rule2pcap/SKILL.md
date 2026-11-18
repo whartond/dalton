@@ -134,7 +134,9 @@ in that directory: it prints `suggested_dir`. Then create `$OUT`, move
 
    Work out exactly what bytes must appear, in which buffer, in which
    direction, and in what order. The `byte_test`/`byte_jump` notes spell
-   out the arithmetic.
+   out the arithmetic. For a keyword or modifier you're unsure of, read
+   the Suricata rules docs for the version under test (research.md,
+   "Suricata documentation"), not from memory.
 2. **Load it in the engines:**
    ```
    $VENV/bin/python $SKILL/scripts/dalton_client.py validate --rules test.rules > $WORK/rule2pcap-output/logs/validate.json
@@ -276,8 +278,8 @@ $VENV/bin/python $SKILL/scripts/dalton_client.py test --pcap <name>.pcap --rules
 ## 6. Iterate
 
 If it doesn't fire, work down the debugging list in
-`references/gotchas.md` before changing the traffic. Change one thing per
-run.
+`references/gotchas.md` before changing the traffic, and check the
+keyword's page in that engine version's docs. Change one thing per run.
 
 Stop after about five build-and-test cycles without progress. Report to
 the user what fires, what doesn't, and your best diagnosis, rather than

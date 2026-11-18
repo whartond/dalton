@@ -10,6 +10,20 @@ have enough: an hour of searching for a generic rule is wasted.
 families from `reference`, `metadata` and `msg`. The `msg` usually names
 the family, exploit or tool.
 
+## Suricata documentation
+
+The rules reference for each engine version under test (from preflight's
+`engines`, e.g. `suricata/8.0.6`) is at
+`https://docs.suricata.io/en/suricata-<version>/rules/index.html`, with a
+page per keyword group (`http-keywords.html`, `payload-keywords.html`,
+`flow-keywords.html`, `thresholding.html`...). Use the versioned pages,
+not `latest`: buffers and keywords differ between 7 and 8. Read them for
+what a buffer holds, what a modifier changes, and keyword defaults.
+
+The engine is the final word: when it behaves differently from the docs,
+build to what it does and note the difference in the write-up. Fetching
+the docs sends nothing of the user's; it may still need web approval.
+
 ## Sources, in rough order
 
 1. **Rulesets the Dalton host already has.** `dalton_client.py preflight`
