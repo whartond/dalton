@@ -895,7 +895,7 @@ def cmd_test(args):
         return 0
     report["expect"] = expect
     report["expect_absent"] = absent
-    mark_rule_errors(report)
+    mark_rule_errors(report, expect + absent)
     loaded = [r for r in report["results"] if r["loaded"]]
     # An engine that can't load the rule (e.g. a keyword newer than that
     # version) says nothing about the pcap. Report it, judge the rest. An
@@ -922,23 +922,60 @@ def cmd_test(args):
     return 0 if report["pass"] else 1
 
 
-def mark_rule_errors(report):
-    """Add rule_errors and loaded to each result, and list the engines that
-    rejected the rules (not_loaded) and the ones that didn't run the pcap
-    (not_run: timed out, interrupted, crashed, or the engine stopped on an
-    error such as a bad config; nothing is known about them)."""
+def failed_sids(rule_errors):
+    """Sids of the rules the engine rejected or skipped, read from the rule
+    text in its "error parsing signature" and "Skipping signature" lines. None
+    if a rule error can't be tied to a sid."""
+    sids, tied = [], True
+    signature_lines = [
+        x for x in rule_errors if "error parsing signature" in x or SKIPPED_RE.search(x)
+    ]
+    for line in signature_lines:
+        m = re.search(r"\bsid\s*:\s*(\d+)", line)
+        if m:
+            sids.append(m.group(1))
+        else:
+            tied = False
+    if rule_errors and not signature_lines:
+        tied = False
+    return sids if tied else None
+
+
+def mark_rule_errors(report, sids=None):
+    """Add rule_errors, failed_sids and loaded to each result, and list the
+    engines that rejected the rules (not_loaded) and the ones that didn't
+    run the pcap (not_run: timed out, interrupted, crashed, or the engine
+    stopped on an error such as a bad config; nothing is known about them).
+
+    With sids, an engine counts as not loaded only if one of those sids, or
+    a rule error that can't be tied to a sid, is among its failures; other
+    rules that failed are listed in rule_warnings and the engine is judged."""
+    report["rule_warnings"] = []
+    name = lambda r: r["tech"] or r.get("image")  # noqa: E731
     for result in report["results"]:
         lines = [x.strip() for x in (result.get("errors") or "").splitlines()]
         result["rule_errors"] = [x for x in lines if is_rule_problem(x)]
+        result["failed_sids"] = failed_sids(result["rule_errors"])
+        blocking = bool(result["rule_errors"])
+        if blocking and sids is not None and result["failed_sids"] is not None:
+            blocking = bool(set(result["failed_sids"]) & set(sids))
+            if not blocking:
+                report["rule_warnings"].append(
+                    f"{name(result)} rejected or skipped sid(s) "
+                    f"{', '.join(result['failed_sids'])}, which this test doesn't "
+                    "check; the expected sids are judged"
+                )
+        result["blocking_errors"] = blocking
         result["loaded"] = (
             result.get("status") == "done"
             and result.get("read_pcap", True)
-            and not result["rule_errors"]
+            and not blocking
         )
-    name = lambda r: r["tech"] or r.get("image")  # noqa: E731
-    report["not_loaded"] = [name(r) for r in report["results"] if r["rule_errors"]]
+    report["not_loaded"] = [name(r) for r in report["results"] if r["blocking_errors"]]
     report["not_run"] = [
-        name(r) for r in report["results"] if not r["loaded"] and not r["rule_errors"]
+        name(r)
+        for r in report["results"]
+        if not r["loaded"] and not r["blocking_errors"]
     ]
 
 

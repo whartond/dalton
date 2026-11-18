@@ -103,6 +103,15 @@ class FakeDalton:
                             "Error: detect-parse: unknown rule keyword 'depthh'.\n\n"
                             'Error: detect: error parsing signature "alert ..." at line 1\n'
                         )
+                    if state.mode == "other-rule-error" and tech == "suricata/7.0.17":
+                        # a second rule in the file, not the one under test
+                        error = (
+                            "Error message(s) found in IDS output.\n\n"
+                            "E: detect-parse: unknown rule keyword 'smtp.mail_from'.\n"
+                            'E: detect: error parsing signature "alert smtp any any -> '
+                            'any any (smtp.mail_from; content:\\"x\\"; sid:2;)" from '
+                            "file /x.rules at line 2\n"
+                        )
                     fast = (
                         "11/14/2026-01:02:03.000000  [**] [1:1000001:1] TEST one [**] "
                         "[Classification: (null)] [Priority: 3] {TCP} "
@@ -631,6 +640,46 @@ def test_apply_sets_list_index():
     assert "- eve-log:\n    enabled: 'no'" in out and "enabled: true" in out
     with pytest.raises(dc.DaltonError, match="no item 5"):
         dc.apply_sets(conf, ["outputs.5.x=1"])
+
+
+def test_another_rule_failing_does_not_drop_the_engine(dalton, files, capsys):
+    pcap, rules = files
+    dalton.mode = "other-rule-error"
+    code, report = run(
+        capsys,
+        [
+            "test",
+            "--url",
+            dalton.url,
+            "--pcap",
+            str(pcap),
+            "--rules",
+            str(rules),
+            "--expect-sid",
+            "1000001",
+        ],
+    )
+    # sid 2 failed on 7.0.17, but the expected sid loaded: judge the engine
+    assert code == 0 and report["pass"] is True and report["not_loaded"] == []
+    assert report["results"][1]["failed_sids"] == ["2"]
+    assert report["results"][1]["expected_fired"] == {"1000001": True}
+    assert "sid(s) 2" in report["rule_warnings"][0]
+    # but if the failing rule is the one expected, the engine isn't judged
+    _, report = run(
+        capsys,
+        [
+            "test",
+            "--url",
+            dalton.url,
+            "--pcap",
+            str(pcap),
+            "--rules",
+            str(rules),
+            "--expect-sid",
+            "2",
+        ],
+    )
+    assert report["not_loaded"] == ["suricata/7.0.17"]
 
 
 def test_rule_skipped_for_requires_is_not_loaded(dalton, files, capsys):

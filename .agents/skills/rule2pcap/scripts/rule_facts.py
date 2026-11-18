@@ -536,10 +536,8 @@ def per_event(facts):
     ):
         return ""
     return (
-        "; matches per event vary on raw TCP: content can match on both "
-        "packet and stream, small events in one flow can merge into one "
-        "stream match, a flow-only rule matches every packet (ACKs too), and "
-        "a header-only rule once per flow. Measure with a copy at count 1"
+        "; on raw TCP one event can make several matches or none of its own. "
+        "Measure with a copy at count 1 (gotchas.md: Matches per event vary)"
     )
 
 

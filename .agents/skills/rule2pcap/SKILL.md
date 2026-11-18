@@ -192,16 +192,11 @@ traffic no real instance would produce.
    - what comes from sources and what you will invent.
 
    For a threshold or detection_filter rule, send count + 1 matching
-   events, inside the window, from the tracked address. On raw TCP, one
-   event doesn't always make one match (see gotchas.md), so measure: run a
-   copy of the rule with `count 1` on the pcap, which alerts on every
-   match. If the matches fall short, the events may have merged into one
-   stream match; give each its own connection or say so. Optionally build
-   a variant below the threshold to show it doesn't fire (test it with
-   `--expect-absent <sid>`), sized from the same measurement. A `type
-   limit` rule alerts from the first match and has no such variant. Test
-   with `--set runmode=single`, or the alert lands on a different packet
-   each run.
+   events, inside the window, from the tracked address. On raw TCP one
+   event doesn't always make one match: measure, and size any
+   below-threshold variant, as gotchas.md ("Matches per event vary")
+   says. Test with `--set runmode=single`, or the alert lands on a
+   different packet each run.
 2. **Pick a template**, copying it to `$OUT/build.py` along with
    `$SKILL/templates/pcapkit.py`:
    - `build_flowsynth.py`: HTTP, DNS, SMTP and most TCP/UDP application
@@ -247,7 +242,9 @@ $VENV/bin/python $SKILL/scripts/dalton_client.py test --pcap <name>.pcap --rules
 - **Engines that can't load the rule:** `not_loaded` lists them, typically
   older versions without a keyword the rule uses. Their `expected_fired`
   is null and they don't count against the pass. Report them as "needs
-  Suricata N or later", not as failures.
+  Suricata N or later", not as failures. Only an expected sid failing to
+  load puts an engine there; another rule that fails (a stand-in, say) is
+  listed in `rule_warnings`, and the engine is still judged.
 - **Engines that didn't run:** `not_run` lists engines that never read the
   pcap: the job timed out, was interrupted or crashed, or the engine
   stopped on an error. Nothing is known about them, so the test fails with

@@ -9,9 +9,10 @@ Check this list before changing the traffic.
 - **Server data is parsed when the client ACKs it.** In IDS mode the
   stream engine hands data to the app-layer parser and to raw-stream
   inspection only once it's acknowledged. A to_client match can land on a
-  later packet than the one carrying the bytes, and nothing is inspected
-  if the capture stops before that ACK. Make sure every data segment is
-  ACKed.
+  later packet than the one carrying the bytes. If the capture ends before
+  that ACK, the data is inspected only when the flow is flushed at the end
+  of the pcap: the alert lands on a pseudo-packet, and its order against
+  other alerts changes. Make sure every data segment is ACKed.
 - **The raw stream is inspected in chunks** (a few KB), and the last chunk
   at flow end. If a rule depends on state set by another rule (a flowbit),
   put the matched bytes late enough that the setter has already run on an
@@ -40,9 +41,16 @@ Check this list before changing the traffic.
   packet in its direction, ACKs and FINs included, and a rule with only
   header fields matches once per flow. `dsize` and `flags` rules, UDP
   rules, and app-layer buffers (`http.*`, `dns.*`, `tls.*`,
-  `file.data`...) count once per packet or transaction. Don't predict it:
-  run a copy of the rule with `threshold:type threshold,track by_src,count
-  1,seconds 60`, which alerts on every match.
+  `file.data`...) count once per packet or transaction. Don't predict it,
+  measure it: run a copy of the rule with `threshold:type threshold,track
+  by_src,count 1,seconds 60`, which alerts on every match. Then:
+  1. Check the firing pcap reaches the count. If events merged into one
+     match, give each its own connection, or tell the user the rule can't
+     count events on one long connection.
+  2. Size any below-threshold variant from the same measurement, not from
+     count − 1, and test it with `--expect-absent <sid>`.
+  3. A `type limit` rule alerts from the first match, so it has no
+     below-threshold variant.
 - **Raw content plus app-layer state on to_client may never fire in IDS
   mode.** Examples are `content` with `ssl_state` or `ssl_version`. The
   state is set when the data is parsed, which is a later packet than the
