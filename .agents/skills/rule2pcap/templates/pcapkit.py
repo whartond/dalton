@@ -14,6 +14,7 @@ Sections:
 """
 
 import datetime
+import os
 import struct
 import subprocess
 import sys
@@ -88,7 +89,8 @@ def http_message(start_line, headers, body=b""):
 
     Content-Length is added when there's no length header and either
     there's a body or it's a response that could carry one: without it, a
-    keep-alive parser reads the next response as this one's body.
+    keep-alive parser reads the next response as this one's body. For a
+    response to HEAD, pass the length the GET's body would have.
     """
     lines = [start_line] + [f"{k}: {v}" for k, v in headers]
     framed = any(
@@ -172,7 +174,12 @@ def flow_line(name, proto, src, sport, dst, dport, src_mac, dst_mac, mss=None):
     IPv6 (Flowsynth's own 1460 makes oversized IPv6 frames) unless given.
     Pass 12 less (1448, 1428) when set_tcp_stack() will give both ends
     timestamps (pk.both_timestamp()); the option takes 12 bytes per segment.
+    A bare IPv6 address is put in the brackets Flowsynth needs, so the same
+    variable can key the IP maps (STACKS, ttl, WAN_HOSTS).
     """
+    src, dst = (
+        f"[{a}]" if ":" in a and not a.startswith("[") else a for a in (src, dst)
+    )
     init = ""
     if proto == "tcp":
         mss = mss or (1440 if ":" in src.strip("[]") else 1460)
@@ -186,11 +193,21 @@ def event_line(name, direction, data):
 
 
 def compile_synth(synth, pcap):
-    subprocess.run(
+    """Compile a .synth file to pcap. Flowsynth reports a syntax error and
+    still exits 0, so the old pcap is removed first and any CRITICAL line
+    raises RuntimeError: a failed build never reuses the last one."""
+    if os.path.exists(pcap):
+        os.remove(pcap)
+    run = subprocess.run(
         [sys.executable, "-m", "flowsynth", "-f", "pcap", "-w", pcap, synth],
-        check=True,
-        stdout=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
     )
+    output = run.stdout + run.stderr
+    critical = [x for x in output.splitlines() if "CRITICAL" in x]
+    if run.returncode or critical or not os.path.exists(pcap):
+        detail = "; ".join(critical) or output.strip()[-500:] or "no pcap written"
+        raise RuntimeError(f"Flowsynth failed on {synth}: {detail}")
 
 
 # ------------------------------------------------------------ post-process

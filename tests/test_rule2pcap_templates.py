@@ -735,3 +735,25 @@ def test_dns_name_with_a_trailing_dot():
     assert pk.dns_messages(1, "a.example.") == pk.dns_messages(1, "a.example")
     with pytest.raises(ValueError, match="empty label"):
         pk.dns_messages(1, "a..example")
+
+
+def test_compile_synth_raises_instead_of_keeping_a_stale_pcap(tmp_path):
+    pk = pcapkit()
+    pcap = tmp_path / "f.pcap"
+    flowsynth_flow(tmp_path, pk, size=10)  # leaves a good f.pcap behind
+    assert pcap.exists()
+    bad = tmp_path / "bad.synth"
+    # mixed IPv4 and IPv6 ends: Flowsynth prints CRITICAL and exits 0
+    bad.write_text("flow f tcp 10.0.0.5:1000 > [2001:db8::1]:80 ( tcp.initialize; );\n")
+    with pytest.raises(RuntimeError, match="Flowsynth failed"):
+        pk.compile_synth(str(bad), str(pcap))
+    assert not pcap.exists()
+
+
+def test_flow_line_brackets_a_bare_ipv6_address():
+    pk = pcapkit()
+    macs = ("02:00:00:00:00:01", "02:00:00:00:00:02")
+    line = pk.flow_line("f", "tcp", "2001:db8::5", 50000, "2001:db8::9", 80, *macs)
+    assert "[2001:db8::5]:50000 > [2001:db8::9]:80" in line and "mss:1440" in line
+    already = pk.flow_line("f", "tcp", "[2001:db8::5]", 1, "[2001:db8::9]", 2, *macs)
+    assert "[[" not in already

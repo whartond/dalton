@@ -23,6 +23,7 @@ h < ( content:"HTTP/1.1 200 OK\x0d\x0aContent-Length: 0\x0d\x0a\x0d\x0a"; );
 ```
 
 - **IPv6 addresses** go in brackets: `[2001:db8::1]:443`.
+  `pcapkit.flow_line()` adds them, so pass the bare address.
 - **Flow attributes:**
   - `tcp.initialize` generates the three-way handshake. Without it, the
     flow starts midstream.

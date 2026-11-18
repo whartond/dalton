@@ -38,9 +38,9 @@ Check this list before changing the traffic.
   six connections made 12 matches; the same content without `depth` made
   6. Six small beacons in one connection made a single match, because the
   stream is inspected in chunks. A rule with only `flow` matches every
-  packet in its direction, ACKs and FINs included, and a rule with only
-  addresses and ports matches once per flow; `ttl`, `window` and other
-  per-packet header fields match every packet that has them. `dsize` and `flags` rules, UDP
+  packet in its direction, ACKs and FINs included. So does a rule with
+  only addresses and ports, plus once more at flow end, and so does one on
+  `ttl`, `window` or another header field, for every packet that has it. `dsize` and `flags` rules, UDP
   rules, and app-layer buffers (`http.*`, `dns.*`, `tls.*`,
   `file.data`...) count once per packet or transaction. Don't predict it,
   measure it: run a copy of the rule with `threshold:type threshold,track
