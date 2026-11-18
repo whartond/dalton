@@ -99,7 +99,16 @@ def test_inert_pe_looks_like_a_linker_built_pe():
     (sections,) = struct.unpack("<H", pe[e_lfanew + 6 : e_lfanew + 8])
     (characteristics,) = struct.unpack("<H", pe[e_lfanew + 22 : e_lfanew + 24])
     assert sections == 1 and characteristics & 0x2000
-    assert pe[e_lfanew + 24 : e_lfanew + 29] == b".text"
+    (optional_size,) = struct.unpack("<H", pe[e_lfanew + 20 : e_lfanew + 22])
+    optional = e_lfanew + 24
+    assert optional_size == 224 and pe[optional : optional + 2] == b"\x0b\x01"
+    (subsystem,) = struct.unpack("<H", pe[optional + 68 : optional + 70])
+    assert subsystem == 2  # Windows GUI
+    text = optional + optional_size
+    assert pe[text : text + 5] == b".text"
+    # the section has no bytes in the file: nothing for the entry point to run
+    raw_size, raw_pointer = struct.unpack("<II", pe[text + 16 : text + 24])
+    assert raw_size == 0 and raw_pointer == 0
     assert len(pe) == 4096
 
 

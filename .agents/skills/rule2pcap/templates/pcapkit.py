@@ -108,10 +108,12 @@ def inert_pe(size=4096, e_lfanew=0x80, rng=None, dll=False):
 
     A standard DOS header (the usual MZ field values and stub, so it looks
     like a linker's output and base64 of it starts "TVqQAAMAAAAEAAAA//8AALgA"),
-    the PE signature at e_lfanew, an i386 COFF header with one .text section
-    header and no optional header, then filler. There's no optional header,
-    entry point or code, so no loader will run it. Filler is seeded random
-    bytes when rng is given, zeros otherwise.
+    the PE signature at e_lfanew, an i386 COFF header, a PE32 optional
+    header (Windows GUI subsystem; libmagic and Suricata's filemagic call it
+    "PE32 executable" or "PE32 executable (DLL)"), one .text section header,
+    then filler. The .text section has no bytes in the file, so the entry
+    point lands on zero-filled memory: there's no code to run. Filler is
+    seeded random bytes when rng is given, zeros otherwise.
     """
     dos = struct.pack(
         "<2s13H8s2H20sI",
@@ -139,23 +141,64 @@ def inert_pe(size=4096, e_lfanew=0x80, rng=None, dll=False):
     dos += b"This program cannot be run in DOS mode.\r\r\n$"
     dos = dos[:e_lfanew].ljust(e_lfanew, b"\0")
     characteristics = 0x0102 | (0x2000 if dll else 0)  # executable, 32-bit (+DLL)
+    optional = struct.pack(
+        "<HBBIIIIIIIIIHHHHHHIIIIHHIIIIII",
+        0x010B,  # PE32
+        14,  # linker version 14.0 (Visual Studio 2015+)
+        0,
+        0,  # size of code: none in the file
+        0,
+        0,
+        0x1000,  # entry point: the start of an empty .text
+        0x1000,  # base of code
+        0x2000,  # base of data
+        0x10000000 if dll else 0x00400000,  # image base
+        0x1000,  # section alignment
+        0x200,  # file alignment
+        6,  # OS version 6.0
+        0,
+        0,
+        0,
+        6,  # subsystem version 6.0
+        0,
+        0,
+        0x2000,  # size of image
+        0x400,  # size of headers
+        0,  # checksum
+        2,  # subsystem: Windows GUI
+        0x8140,  # DYNAMIC_BASE, NX_COMPAT, TERMINAL_SERVER_AWARE
+        0x100000,  # stack reserve
+        0x1000,
+        0x100000,  # heap reserve
+        0x1000,
+        0,
+        16,  # data directories, all empty
+    ) + bytes(16 * 8)
     coff = struct.pack(
-        "<4sHHIIIHH", b"PE\0\0", 0x014C, 1, 0x5E2A1C00, 0, 0, 0, characteristics
+        "<4sHHIIIHH",
+        b"PE\0\0",
+        0x014C,
+        1,
+        0x5E2A1C00,
+        0,
+        0,
+        len(optional),
+        characteristics,
     )
     text = struct.pack(
         "<8sIIIIIIHHI",
         b".text\0\0\0",
         0x1000,  # virtual size
         0x1000,  # virtual address
-        0x200,  # raw size
-        0x400,  # raw pointer
+        0,  # raw size: no bytes in the file
+        0,  # raw pointer
         0,
         0,
         0,
         0,
         0x60000020,  # code, execute, read
     )
-    body = dos + coff + text
+    body = dos + coff + optional + text
     filler = size - len(body)
     if filler > 0:
         body += (

@@ -119,6 +119,11 @@ Check this list before changing the traffic.
   `EXTERNAL_NET` to `!$HOME_NET`. Inside hosts must be RFC1918 and outside
   hosts must not be. Use 192.0.2.0/24, 198.51.100.0/24 or 203.0.113.0/24
   for outside hosts.
+- That `HOME_NET` is IPv4 only, so over IPv6 no host is inside and a rule
+  on `$HOME_NET` or `$EXTERNAL_NET` can't fire, with no error. Build over
+  IPv4 unless the rule is about IPv6. If it is, add the inside hosts'
+  IPv6 range to `HOME_NET` for the test, and say so in the write-up:
+  `--set "vars.address-groups.HOME_NET=[192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,2001:db8:10::/48]"`.
 - Port variables follow Suricata's defaults, e.g. `$HTTP_PORTS` is 80.
   `rule_facts.py` lists the ones a rule uses.
 - Dalton rejects rules containing non-ASCII text, and gives rules with no
@@ -166,17 +171,20 @@ Work down this list, one change at a time:
 1. Run `dalton_client.py validate`. Did every engine load the rule?
 2. Check `pcap_lint.py` for errors: checksums, missing handshake, sequence
    gaps.
-3. Check the eve alert or flow for `app_proto`. Was the protocol detected?
-4. Split the rule into one rule per condition, each with its own sid, and
+3. Check the header: are the pcap's addresses and ports inside the rule's
+   variables? An IPv6 build is never in Dalton's `HOME_NET` (see
+   "Variables and the job config").
+4. Check the eve alert or flow for `app_proto`. Was the protocol detected?
+5. Split the rule into one rule per condition, each with its own sid, and
    see which conditions match and on which packet (`pcap_cnt` in the test
    output). Conditions that match on different packets point to the
    inspection-timing items above.
-5. Look at what the parser extracted: the eve app-layer record
+6. Look at what the parser extracted: the eve app-layer record
    (`http`, `dns`, `tls`, `smtp`...) for the flow shows the fields the
    buffers come from. Rerun with `--dump-buffers` to get buffer dumps on
    the job's page in Dalton's web UI. They cover HTTP, DNS and TLS only,
    and aren't in the API output.
-6. Try `--set stream.inline=true`, and a teardown if there isn't one.
-7. Re-read the rule's modifiers: `depth`/`offset` count from the buffer
+7. Try `--set stream.inline=true`, and a teardown if there isn't one.
+8. Re-read the rule's modifiers: `depth`/`offset` count from the buffer
    start, `distance`/`within` from the previous match, `nocase` is
    per-content, and `startswith`/`endswith` anchor to the buffer.

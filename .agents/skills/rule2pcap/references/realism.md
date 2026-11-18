@@ -8,8 +8,9 @@ client would plausibly send, and list it in the write-up.
 ## Hosts and addresses
 
 - Put the inside host (victim, client or server) in RFC1918 space and
-  outside hosts in 192.0.2.0/24, 198.51.100.0/24 or 203.0.113.0/24 (or
-  2001:db8::/32). A well-known public service (a public resolver, a CDN)
+  outside hosts in 192.0.2.0/24, 198.51.100.0/24 or 203.0.113.0/24. Use
+  IPv6 (2001:db8::/32) only when the rule is about IPv6: Dalton's
+  `HOME_NET` is IPv4 only (see gotchas, "Variables and the job config"). A well-known public service (a public resolver, a CDN)
   may keep its real address if it matters to the story.
 - Never use real victim addresses, even from public reports. An attacker
   IOC address from public reporting is allowed, but label it as one in the
@@ -102,8 +103,8 @@ client would plausibly send, and list it in the write-up.
 - Never include working malware binaries or live credentials. Where the
   rule doesn't inspect a field, an inert placeholder is fine: a PDF whose
   JavaScript does nothing, or a "payload" that's a harmless stub. For
-  Windows executables use `pcapkit.inert_pe()`: MZ header, e_lfanew, PE
-  signature, and no code. Bytes the rule matches must be exact even if
+  Windows executables use `pcapkit.inert_pe()`: valid PE32 headers (file
+  type tools and `filemagic` see "PE32 executable") and no code. Bytes the rule matches must be exact even if
   they are exploit bytes; they need not be functional.
 - Use invented users, hostnames, emails and passwords: `jmills`,
   `WS-FIN-07`, `dmorgan@example.com`.
