@@ -1006,7 +1006,9 @@ def failed_sids(rule_errors):
     return sids if tied else None
 
 
-BIT_RE = re.compile(r"(?:^|[;(\s])(flowbits|xbits|hostbits)\s*:\s*(\w+)\s*,\s*([^;,]+)")
+BIT_RE = re.compile(
+    r"(?:^|[;(\s])(flowbits|xbits|hostbits)\s*:\s*(\w+)\s*,\s*([^;,]+)([^;]*)"
+)
 
 
 def bit_uses(rules_text):
@@ -1022,8 +1024,11 @@ def bit_uses(rules_text):
         if not m:
             continue
         sets, checks = set(), set()
-        for kind, command, names in BIT_RE.findall(options):
-            kind = "flowbits" if kind == "flowbits" else "hostbits"  # xbits share
+        for kind, command, names, rest in BIT_RE.findall(options):
+            # xbits tracked by ip_src or ip_dst are hostbits; by ip_pair,
+            # they live in separate ip-pair storage
+            if kind == "xbits":
+                kind = "ippair" if re.search(r"\bip_pair\b", rest) else "hostbits"
             for n in re.split(r"[|&]", names):
                 if not n.strip():
                     continue

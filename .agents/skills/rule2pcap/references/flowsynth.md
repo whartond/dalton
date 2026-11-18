@@ -62,6 +62,7 @@ harmless with it.
 | No FIN support, so flows never close | `pcapkit.teardown(pkts, closer=..., idle=..., remote=WAN_HOSTS, rtt=RTT, rng=rng)`. Don't hand-roll FIN events with `tcp.flags.*`; the ACK numbers come out wrong |
 | Window 8192 on every packet, and SYNs with no TCP options | `pcapkit.set_tcp_stack(pkts, {ip: "windows" or "linux" or "macos"}, rng)`, after teardown. When both ends use timestamps, compile with `flow_line(..., mss=1448)` (`pcapkit.both_timestamp()`) |
 | Ports left as `any` are random per build | Always give explicit ports, drawn from the seeded `rng` |
+| Two flows on the same addresses and ports are one connection to Suricata, so the second one's data may never be inspected | Give each connection its own source port (`randomize_isns()` and `teardown()` raise otherwise) |
 | TTL 64 and IP ID 1 on every packet | `pcapkit.set_ip_fields(pkts, rng, ttl={...})`, run last |
 | No other IP header control (options, fragments) | Build those packets with scapy (`templates/build_scapy.py`) |
 | One flow at a time per declaration; awkward for hundreds of interleaved connections | Use `pcapkit.tcp_session()` in scapy |

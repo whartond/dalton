@@ -290,6 +290,7 @@ def new_flow(proto, client, server):
         "edge": {"c": None, "s": None},
         "data_before_handshake": None,
         "bare_syn": False,
+        "reused": False,
         "first_frame": None,
     }
 
@@ -314,6 +315,17 @@ def track_tcp(out, flows, frame, ts, ip, tcp):
         if flags.A:
             flow["synack"] = True
         else:
+            if flow["synack"] and not flow["reused"]:
+                flow["reused"] = True
+                out.add(
+                    "warning",
+                    "reused-tuple",
+                    "a new SYN on a connection already open on the same "
+                    "addresses and ports: Suricata treats it as part of the "
+                    "old one and may never inspect the new data. Give each "
+                    "connection its own source port",
+                    frame,
+                )
             flow["syn"] = True
         if not tcp.options:
             flow["bare_syn"] = True

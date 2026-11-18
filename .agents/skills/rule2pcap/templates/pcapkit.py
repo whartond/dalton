@@ -291,12 +291,32 @@ def restamp(pkts, start, gap):
         earlier.append(p)
 
 
+def check_one_connection_per_tuple(pkts):
+    """Raise ValueError if a SYN opens a second connection on addresses and
+    ports an earlier connection used: the helpers here, and Suricata,
+    would treat both as one flow. A resent SYN before the SYN/ACK is fine."""
+    answered = set()
+    for p in pkts:
+        if TCP not in p or not p[TCP].flags.S:
+            continue
+        src, dst = endpoints(p)
+        if p[TCP].flags.A:
+            answered.add(frozenset((src, dst)))
+        elif frozenset((src, dst)) in answered:
+            raise ValueError(
+                f"two TCP connections on {src[0]}:{src[1]} -> {dst[0]}:{dst[1]}; "
+                "give each connection its own source port"
+            )
+
+
 def randomize_isns(pkts, rng):
     """Give each TCP flow seeded random ISNs.
 
     Flowsynth 1.4's tcp.initialize starts every flow at ISN 10 (client) and
-    100 (server), which no real stack does.
+    100 (server), which no real stack does. Raises ValueError if two
+    connections share addresses and ports.
     """
+    check_one_connection_per_tuple(pkts)
     offsets, out = {}, []
     for p in pkts:
         if TCP not in p:
@@ -353,6 +373,7 @@ def teardown(
     set_ip_fields() afterwards so IP IDs stay unique.
     """
     draw_rtt(rtt, rng)  # fail early on a range without rng
+    check_one_connection_per_tuple(pkts)
     flows = {}
     for p in pkts:
         if TCP in p:
@@ -476,7 +497,8 @@ def stack_profile(stack):
         return dict(STACKS[stack])
     stack = dict(stack)
     # a whole profile (one this returned before) stands on its own
-    base = stack.pop("base", None if "options" in stack else "linux")
+    whole = set(STACKS["windows"]) <= set(stack)
+    base = stack.pop("base", None if whole else "linux")
     return {**(STACKS[base] if base else {}), **stack}
 
 
@@ -607,26 +629,34 @@ def set_tcp_stack(pkts, stacks, rng, mss=None):
             tsval[(src, dst)] = rng.randrange(1, 2**31)
             t0[(src, dst)] = float(p.time)
         now = float(p.time)
-        if not prof:
-            # keep a host left out of stacks' own timestamps, to echo them
-            ts = dict(p[TCP].options or []).get("Timestamp")
-            if ts:
-                seen.setdefault((src, dst), []).append((now, ts[0], _seq_end(p)))
-            continue
-        q = p.copy()
-        tcp = q[TCP]
-        val = (tsval[(src, dst)] + int((now - t0[(src, dst)]) * 1000)) % SEQ_MOD
         # echo the peer's latest timestamp that has reached this host: one
         # on a segment this packet ACKs, or one captured long enough ago (the
         # far end sees the near end's packets about an RTT after capture)
         cutoff = now - 0.9 * lag(src, dst)
-        peer = seen.get((dst, src), [])
         echo = 0
-        for at, v, end in reversed(peer):
-            acked = end is not None and tcp.flags.A and _covers(tcp.ack, end)
+        for at, v, end in reversed(seen.get((dst, src), [])):
+            acked = end is not None and p[TCP].flags.A and _covers(p[TCP].ack, end)
             if at <= cutoff or acked:
                 echo = v
                 break
+        if not prof:
+            # a host left out of stacks keeps its own timestamps, but echoes
+            # the peer's rewritten ones
+            opts = p[TCP].options or []
+            ts = dict(opts).get("Timestamp")
+            if ts:
+                seen.setdefault((src, dst), []).append((now, ts[0], _seq_end(p)))
+                if dst[0] in profiles and not (p[TCP].flags.S and not p[TCP].flags.A):
+                    q = p.copy()
+                    q[TCP].options = [
+                        (n, (v[0], echo)) if n == "Timestamp" else (n, v)
+                        for n, v in opts
+                    ]
+                    out[i] = rebuild(q, p.time)
+            continue
+        q = p.copy()
+        tcp = q[TCP]
+        val = (tsval[(src, dst)] + int((now - t0[(src, dst)]) * 1000)) % SEQ_MOD
         if tcp.flags.S:
             seg = next((o[1] for o in tcp.options or [] if o[0] == "MSS"), None)
             seg = seg or mss or (1440 if IPv6 in q else 1460)

@@ -330,6 +330,16 @@ def test_failed_setter_blocks_the_rule_that_checks_its_bit():
     assert dc.broken_by(["104"], rules) == {"104", "105"}
     # another rule (106) still sets r2p.x
     assert dc.broken_by(["100"], rules) == {"100"}
+    # xbits tracked by ip_pair live apart from hostbits
+    pair = (
+        'alert tcp any any -> any any (msg:"a"; xbits:set,foo,track ip_pair; sid:1;)\n'
+        'alert tcp any any -> any any (msg:"b"; hostbits:set,foo,src; sid:2;)\n'
+        'alert tcp any any -> any any (msg:"c"; hostbits:isset,foo,src; sid:3;)\n'
+        'alert tcp any any -> any any (msg:"d"; xbits:isset,foo,track ip_pair; sid:4;)\n'
+        'alert tcp any any -> any any (msg:"e"; xbits:isset,foo,track ip_src; sid:5;)\n'
+    )
+    assert dc.broken_by(["2"], pair) == {"2", "3", "5"}
+    assert dc.broken_by(["1"], pair) == {"1", "4"}
     # but a rule that only unsets it doesn't
     unsets = rules.replace(
         "flowbits:set,r2p.x; sid:106", "flowbits:unset,r2p.x; sid:106"

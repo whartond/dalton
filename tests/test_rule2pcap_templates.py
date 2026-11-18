@@ -648,6 +648,21 @@ def test_stack_profile_keeps_a_whole_profile_as_it_is():
     assert pk.stack_profile(win) == win  # not merged onto linux
     assert "synack_window_nots" not in win
     assert pk.stack_profile({"window": 29200})["wscale"] == 7  # linux base
+    # an options override alone is still merged onto linux
+    opts = ["MSS", "NOP", "WScale", "SAckOK", "Timestamp"]
+    assert pk.stack_profile({"options": opts})["ts"] is True
+    assert pk.Host("10.0.0.1", "02:00:00:00:00:01", stack={"options": opts}).window
+
+
+def test_reused_ports_raise(tmp_path):
+    pk = pcapkit()
+    pkts = flowsynth_flow(tmp_path, pk, size=100)
+    import random
+
+    with pytest.raises(ValueError, match="own source port"):
+        pk.randomize_isns(pkts + pkts, random.Random(1))
+    with pytest.raises(ValueError, match="own source port"):
+        pk.teardown(pkts + pkts)
 
 
 @pytest.mark.parametrize("server", ["windows", "linux", "macos"])
@@ -666,3 +681,39 @@ def test_tcp_session_big_first_message_stays_in_window(tmp_path, client, server)
     wrpcap(str(tmp_path / "w.pcap"), pkts)
     codes = {f["code"] for f in pl.lint(str(tmp_path / "w.pcap"))["findings"]}
     assert "beyond-window" not in codes
+
+
+def test_host_outside_stacks_echoes_the_rewritten_timestamps():
+    import random
+
+    from scapy.layers.inet import IP, TCP
+    from scapy.layers.l2 import Ether
+
+    pk = pcapkit()
+    c, s = "10.0.0.5", "203.0.113.9"
+
+    def pkt(t, src, dst, flags, seq, ack, ts):
+        sport, dport = (40000, 80) if src == c else (80, 40000)
+        opts = (
+            [("MSS", 1460), ("Timestamp", ts)]
+            if "S" in flags
+            else [("NOP", None), ("NOP", None), ("Timestamp", ts)]
+        )
+        p = (
+            Ether()
+            / IP(src=src, dst=dst)
+            / TCP(sport=sport, dport=dport, flags=flags, seq=seq, ack=ack, options=opts)
+        )
+        p.time = t
+        return p
+
+    pkts = [
+        pkt(1.7e9, c, s, "S", 100, 0, (7000, 0)),
+        pkt(1.7e9 + 0.04, s, c, "SA", 500, 101, (9000, 7000)),
+        pkt(1.7e9 + 0.0403, c, s, "A", 101, 501, (7040, 9000)),
+    ]
+    out = pk.set_tcp_stack(pkts, {s: "linux"}, random.Random(1))
+    server_ts = dict(out[1][TCP].options)["Timestamp"][0]
+    assert server_ts != 9000
+    client = dict(out[2][TCP].options)["Timestamp"]
+    assert client == (7040, server_ts)  # own clock, the peer's new value

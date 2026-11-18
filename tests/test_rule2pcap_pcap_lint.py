@@ -211,3 +211,12 @@ def test_syn_without_options_is_flagged(tmp_path):
     result = pl.lint(write(tmp_path, pkts))
     (bare,) = [f for f in result["findings"] if f["code"] == "bare-syn"]
     assert bare["level"] == "warning" and bare["frames"] == [1]
+
+
+def test_second_connection_on_the_same_ports_is_flagged(tmp_path):
+    pkts = stamp(session() + session())
+    assert "reused-tuple" in codes(pl.lint(write(tmp_path, pkts)))
+    # a resent SYN before the SYN/ACK is not a new connection
+    again = session()
+    pkts = stamp(again[:1] + again)
+    assert "reused-tuple" not in codes(pl.lint(write(tmp_path, pkts, "y.pcap")))
