@@ -39,7 +39,8 @@ Check this list before changing the traffic.
   6. Six small beacons in one connection made a single match, because the
   stream is inspected in chunks. A rule with only `flow` matches every
   packet in its direction, ACKs and FINs included, and a rule with only
-  header fields matches once per flow. `dsize` and `flags` rules, UDP
+  addresses and ports matches once per flow; `ttl`, `window` and other
+  per-packet header fields match every packet that has them. `dsize` and `flags` rules, UDP
   rules, and app-layer buffers (`http.*`, `dns.*`, `tls.*`,
   `file.data`...) count once per packet or transaction. Don't predict it,
   measure it: run a copy of the rule with `threshold:type threshold,track

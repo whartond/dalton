@@ -717,3 +717,21 @@ def test_host_outside_stacks_echoes_the_rewritten_timestamps():
     assert server_ts != 9000
     client = dict(out[2][TCP].options)["Timestamp"]
     assert client == (7040, server_ts)  # own clock, the peer's new value
+
+
+def test_http_message_frames_a_bodiless_response():
+    pk = pcapkit()
+    redirect = pk.http_message("HTTP/1.1 302 Found", [("Location", "/b")])
+    assert b"Content-Length: 0\r\n" in redirect
+    for line in ("HTTP/1.1 204 No Content", "HTTP/1.1 304 Not Modified"):
+        assert b"Content-Length" not in pk.http_message(line, [])
+    assert b"Content-Length" not in pk.http_message("GET / HTTP/1.1", [("Host", "a")])
+    chunked = pk.http_message("HTTP/1.1 200 OK", [("Transfer-Encoding", "chunked")])
+    assert b"Content-Length" not in chunked
+
+
+def test_dns_name_with_a_trailing_dot():
+    pk = pcapkit()
+    assert pk.dns_messages(1, "a.example.") == pk.dns_messages(1, "a.example")
+    with pytest.raises(ValueError, match="empty label"):
+        pk.dns_messages(1, "a..example")

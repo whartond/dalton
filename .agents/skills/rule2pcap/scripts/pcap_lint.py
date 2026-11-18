@@ -315,7 +315,12 @@ def track_tcp(out, flows, frame, ts, ip, tcp):
         if flags.A:
             flow["synack"] = True
         else:
-            if flow["synack"] and not flow["reused"]:
+            # a new SYN while the old connection is still open
+            if (
+                flow["synack"]
+                and not (flow["fin"] or flow["rst"])
+                and not flow["reused"]
+            ):
                 flow["reused"] = True
                 out.add(
                     "warning",

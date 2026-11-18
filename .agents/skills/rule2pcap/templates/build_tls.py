@@ -55,7 +55,12 @@ RTT = (0.038, 0.052)  # internet round trip range, seconds
 # Each host's OS: TCP options, windows, timestamps (pk.set_tcp_stack).
 STACKS = {VICTIM: "windows", SERVER: "linux"}
 # both ends using timestamps leaves 12 fewer bytes per segment for data
-SEGMENT = 1448 if pk.both_timestamp(STACKS[VICTIM], STACKS[SERVER]) else None
+# both ends timestamping leave MSS - 12 for data (1460 IPv4, 1440 IPv6)
+SEGMENT = (
+    (1428 if ":" in VICTIM else 1448)
+    if pk.both_timestamp(STACKS[VICTIM], STACKS[SERVER])
+    else None
+)
 SNI = None  # many implants dial an IP and send no SNI; set a name if the rule needs one
 SUBJECT = [("C", "US"), ("O", "Secure Login Ltd"), ("CN", "secure-login.example.org")]
 CERT_START = datetime.datetime(2024, 4, 30, 8, 0, 0, tzinfo=datetime.timezone.utc)

@@ -54,7 +54,12 @@ RTT = (0.035, 0.060)  # internet round trip range, seconds
 STACKS = {VICTIM: "windows", SERVER: "linux"}
 # Segment size: when both ends use timestamps (Linux, macOS), each segment
 # carries a 12-byte option, so data segments are 12 bytes smaller.
-SEGMENT = 1448 if pk.both_timestamp(STACKS[VICTIM], STACKS[SERVER]) else None
+# both ends timestamping leave MSS - 12 for data (1460 IPv4, 1440 IPv6)
+SEGMENT = (
+    (1428 if ":" in VICTIM else 1448)
+    if pk.both_timestamp(STACKS[VICTIM], STACKS[SERVER])
+    else None
+)
 
 rng = random.Random(SEED)
 

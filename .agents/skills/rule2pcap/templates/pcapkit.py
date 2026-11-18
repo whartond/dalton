@@ -58,7 +58,10 @@ def dns_messages(txid, name, addr=None, ttl=300, qtype="A", rcode=0):
         if (qtype, version) not in (("A", 4), ("AAAA", 6)):
             raise ValueError(f"qtype {qtype} can't answer with {addr}")
 
-    qname = b"".join(bytes([len(p)]) + p.encode() for p in name.split(".")) + b"\0"
+    labels = name.rstrip(".").split(".")  # a trailing dot is the root
+    if not all(labels):
+        raise ValueError(f"empty label in DNS name {name!r}")
+    qname = b"".join(bytes([len(p)]) + p.encode() for p in labels) + b"\0"
     question = qname + struct.pack(">HH", QTYPES[qtype], 1)
     query = struct.pack(">HHHHHH", txid, 0x0100, 1, 0, 0, 0) + question
     answers = b""
@@ -83,12 +86,17 @@ def http_date(dt):
 def http_message(start_line, headers, body=b""):
     """An HTTP/1.x message from a start line and (name, value) pairs.
 
-    Content-Length is added when there's a body and no length header.
+    Content-Length is added when there's no length header and either
+    there's a body or it's a response that could carry one: without it, a
+    keep-alive parser reads the next response as this one's body.
     """
     lines = [start_line] + [f"{k}: {v}" for k, v in headers]
-    if body and not any(
+    framed = any(
         k.lower() in ("content-length", "transfer-encoding") for k, _ in headers
-    ):
+    )
+    status = start_line.split()[1] if start_line.startswith("HTTP/") else None
+    bodiless = status is not None and (status[:1] == "1" or status in ("204", "304"))
+    if not framed and (body or (status is not None and not bodiless)):
         lines.append(f"Content-Length: {len(body)}")
     return ("\r\n".join(lines) + "\r\n\r\n").encode() + body
 
@@ -427,7 +435,8 @@ def set_ip_fields(pkts, rng, ttl=None, df=True):
     IP -> TTL as seen at the capture point (local Windows 128, local Linux
     64, a remote host a few hops lower, e.g. 52 or 116). IDs start at a
     seeded random value per host and count up per packet, as Windows and
-    most embedded stacks do. Run this last, after teardown().
+    most embedded stacks do. IPv4 only: IPv6 packets keep Flowsynth's hop
+    limit of 64. Run this last, after teardown().
     """
     ttl = ttl or {}
     next_id = {}

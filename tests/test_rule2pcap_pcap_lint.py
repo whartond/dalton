@@ -214,9 +214,14 @@ def test_syn_without_options_is_flagged(tmp_path):
 
 
 def test_second_connection_on_the_same_ports_is_flagged(tmp_path):
-    pkts = stamp(session() + session())
+    still_open = session()[:5]  # no FINs yet
+    pkts = stamp(still_open + session())
     assert "reused-tuple" in codes(pl.lint(write(tmp_path, pkts)))
     # a resent SYN before the SYN/ACK is not a new connection
     again = session()
     pkts = stamp(again[:1] + again)
     assert "reused-tuple" not in codes(pl.lint(write(tmp_path, pkts, "y.pcap")))
+    # nor is a new connection after the old one closed
+    closed = session()[:-1]  # FINs both ways, the last ACK lost
+    pkts = stamp(closed + session())
+    assert "reused-tuple" not in codes(pl.lint(write(tmp_path, pkts, "z.pcap")))
