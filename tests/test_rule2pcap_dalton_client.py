@@ -330,6 +330,11 @@ def test_failed_setter_blocks_the_rule_that_checks_its_bit():
     assert dc.broken_by(["104"], rules) == {"104", "105"}
     # another rule (106) still sets r2p.x
     assert dc.broken_by(["100"], rules) == {"100"}
+    # but a rule that only unsets it doesn't
+    unsets = rules.replace(
+        "flowbits:set,r2p.x; sid:106", "flowbits:unset,r2p.x; sid:106"
+    )
+    assert {"100", "101", "102"} <= dc.broken_by(["100"], unsets)
 
     def report():
         line = 'E: detect: error parsing signature "alert tls ... sid:100;)"'

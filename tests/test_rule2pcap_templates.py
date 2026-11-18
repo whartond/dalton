@@ -529,3 +529,140 @@ def test_scapy_helpers_take_an_rtt_range():
     assert 0.03 <= float(r.time) - float(q.time) <= 0.05
     with pytest.raises(ValueError, match="needs rng"):
         pk.icmp_echo(1.7e9, a, b, 1, 1, b"x", None, rtt=(0.03, 0.05))
+
+
+def test_tcp_session_first_flight_fits_a_synack_without_timestamps(tmp_path):
+    import random
+
+    from scapy.layers.inet import TCP
+    from scapy.utils import wrpcap
+
+    pk = pcapkit()
+    a = pk.Host("192.168.1.5", "02:00:00:00:00:01", ttl=128, stack="windows")
+    b = pk.Host("203.0.113.9", "02:00:00:00:00:02", ttl=52, stack="linux")
+    pkts, _ = pk.tcp_session(
+        1.7e9, a, b, 50000, 80, [(">", bytes(200000)), ("<", b"ok")], random.Random(2)
+    )
+    assert pkts[1][TCP].window == 64240  # Linux, no timestamps agreed
+    wrpcap(str(tmp_path / "w.pcap"), pkts)
+    codes = {f["code"] for f in pl.lint(str(tmp_path / "w.pcap"))["findings"]}
+    assert "beyond-window" not in codes
+
+
+def test_far_end_echoes_what_it_acks(tmp_path):
+    import random
+
+    from scapy.layers.inet import TCP
+
+    pk = pcapkit()
+    rng = random.Random(4)
+    a = pk.Host("192.168.1.5", "02:00:00:00:00:01", stack="linux")
+    b = pk.Host("203.0.113.9", "02:00:00:00:00:02", ttl=52, stack="linux")
+    msgs = [(">", b"GET / HTTP/1.1\r\n\r\n"), ("<", bytes(20000))] * 3
+    for n in range(6):
+        pkts, _ = pk.tcp_session(
+            1.7e9, a, b, 50000 + n, 80, msgs, rng, rtt=(0.038, 0.055)
+        )
+        sent = []  # (seq end, TSval) of the client's packets so far
+        for p in pkts:
+            tcp = p[TCP]
+            ts = dict(tcp.options)["Timestamp"]
+            if p["IP"].src == a.ip:
+                end = (
+                    tcp.seq + len(bytes(tcp.payload)) + bool(tcp.flags.S or tcp.flags.F)
+                )
+                sent.append((end % 2**32, ts[0]))
+            elif tcp.flags.A:
+                acked = [v for end, v in sent if (tcp.ack - end) % 2**32 < 2**31]
+                # never older than the newest segment it acknowledges
+                assert ts[1] >= max(acked)
+
+
+def test_resent_syn_is_the_one_echoed():
+    import random
+
+    from scapy.layers.inet import IP, TCP
+    from scapy.layers.l2 import Ether
+
+    pk = pcapkit()
+
+    def pkt(t, src, dst, sport, dport, flags, seq, ack=0, load=b""):
+        p = (
+            Ether()
+            / IP(src=src, dst=dst)
+            / TCP(sport=sport, dport=dport, flags=flags, seq=seq, ack=ack)
+        )
+        if load:
+            p = p / load
+        p.time = t
+        return p
+
+    c, s = "10.0.0.5", "203.0.113.9"
+    pkts = [
+        pkt(1.7e9, c, s, 40000, 80, "S", 100),
+        pkt(1.7e9 + 1, c, s, 40000, 80, "S", 100),
+        pkt(1.7e9 + 1.045, s, c, 80, 40000, "SA", 500, 101),
+        pkt(1.7e9 + 1.0453, c, s, 40000, 80, "A", 101, 501),
+    ]
+    stacks = {c: "linux", s: "linux"}
+    out = pk.set_tcp_stack(pkts, stacks, random.Random(1))
+    second = dict(out[1][TCP].options)["Timestamp"][0]
+    assert dict(out[2][TCP].options)["Timestamp"][1] == second
+
+
+def test_host_outside_stacks_gets_its_timestamps_echoed():
+    import random
+
+    from scapy.layers.inet import IP, TCP
+    from scapy.layers.l2 import Ether
+
+    pk = pcapkit()
+    c, s = "10.0.0.5", "203.0.113.9"
+    syn = (
+        Ether()
+        / IP(src=c, dst=s)
+        / TCP(
+            sport=40000,
+            dport=80,
+            flags="S",
+            seq=100,
+            options=[("MSS", 1460), ("Timestamp", (777, 0))],
+        )
+    )
+    synack = (
+        Ether()
+        / IP(src=s, dst=c)
+        / TCP(sport=80, dport=40000, flags="SA", seq=500, ack=101)
+    )
+    syn.time, synack.time = 1.7e9, 1.7e9 + 0.04
+    out = pk.set_tcp_stack([syn, synack], {s: "linux"}, random.Random(1))
+    opts = out[1][TCP].options
+    assert dict(opts)["Timestamp"][1] == 777
+    # no SACK to sit beside, so the timestamp gets its own NOP padding
+    assert [o[0] for o in opts] == ["MSS", "NOP", "NOP", "Timestamp"]
+
+
+def test_stack_profile_keeps_a_whole_profile_as_it_is():
+    pk = pcapkit()
+    win = pk.stack_profile("windows")
+    assert pk.stack_profile(win) == win  # not merged onto linux
+    assert "synack_window_nots" not in win
+    assert pk.stack_profile({"window": 29200})["wscale"] == 7  # linux base
+
+
+@pytest.mark.parametrize("server", ["windows", "linux", "macos"])
+@pytest.mark.parametrize("client", ["windows", "linux", "macos"])
+def test_tcp_session_big_first_message_stays_in_window(tmp_path, client, server):
+    import random
+
+    from scapy.utils import wrpcap
+
+    pk = pcapkit()
+    a = pk.Host("192.168.1.5", "02:00:00:00:00:01", stack=client)
+    b = pk.Host("203.0.113.9", "02:00:00:00:00:02", ttl=52, stack=server)
+    pkts, _ = pk.tcp_session(
+        1.7e9, a, b, 50000, 80, [(">", bytes(100000)), ("<", b"ok")], random.Random(2)
+    )
+    wrpcap(str(tmp_path / "w.pcap"), pkts)
+    codes = {f["code"] for f in pl.lint(str(tmp_path / "w.pcap"))["findings"]}
+    assert "beyond-window" not in codes

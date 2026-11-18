@@ -475,7 +475,17 @@ def stack_profile(stack):
     if isinstance(stack, str):
         return dict(STACKS[stack])
     stack = dict(stack)
-    return {**STACKS[stack.pop("base", "linux")], **stack}
+    # a whole profile (one this returned before) stands on its own
+    base = stack.pop("base", None if "options" in stack else "linux")
+    return {**(STACKS[base] if base else {}), **stack}
+
+
+def synack_window(prof, ts_ok):
+    """The window a stack's SYN/ACK offers: some round it to the MSS less
+    the timestamp option, so it depends on whether both ends use them."""
+    if ts_ok:
+        return prof["synack_window"]
+    return prof.get("synack_window_nots", prof["synack_window"])
 
 
 def both_timestamp(a, b):
@@ -493,19 +503,38 @@ def _offers(p, name):
 
 
 NEGOTIATED = ("WScale", "SAckOK", "Timestamp")
+OPTION_SIZE = {"MSS": 4, "WScale": 3, "SAckOK": 2, "Timestamp": 10, "NOP": 1, "EOL": 1}
 
 
 def _drop_options(names, drop):
-    """names without those in drop, and without the NOPs that padded them."""
+    """names without those in drop, and without the NOPs that padded them.
+    A timestamp left on a 4-byte boundary gets two NOPs in front, as real
+    stacks align it."""
     out, pad = [], []
     for n in names:
         if n == "NOP":
             pad.append(n)
             continue
         if n not in drop:
-            out += pad + [n]
+            out += pad
+            if n == "Timestamp" and sum(OPTION_SIZE[o] for o in out) % 4 == 0:
+                out += ["NOP", "NOP"]
+            out.append(n)
         pad = []
     return out
+
+
+def _seq_end(p):
+    """The sequence number just past a TCP packet's data, SYN or FIN; None
+    for a packet with none of them, which no ACK acknowledges."""
+    tcp = p[TCP]
+    used = len(bytes(tcp.payload)) + bool(tcp.flags.S) + bool(tcp.flags.F)
+    return (tcp.seq + used) % SEQ_MOD if used else None
+
+
+def _covers(ack, end):
+    """True when ack acknowledges everything before end (mod 2**32)."""
+    return (ack - end) % SEQ_MOD < 2**31
 
 
 def set_tcp_stack(pkts, stacks, rng, mss=None):
@@ -518,11 +547,13 @@ def set_tcp_stack(pkts, stacks, rng, mss=None):
     scale, SACK, timestamps) and its unscaled window. Later packets get the
     window field shifted by the scale both sides agreed, and, when both
     offered timestamps, a timestamp option whose value counts milliseconds
-    from a seeded start and echoes the peer's latest. MSS is the SYN's own
-    MSS option if it has one, else mss, else 1460 (IPv4) or 1440 (IPv6).
-    When both ends of a flow use timestamps (both_timestamp()), data
-    segments must leave 12 bytes for the option: compile Flowsynth with
-    flow_line(..., mss=1448), or this raises ValueError. Run it after teardown() and before set_ip_fields().
+    from a seeded start and echoes the peer's latest one this host has
+    received (on a segment it ACKs, or captured an RTT earlier). MSS is
+    the SYN's own MSS option if it has one, else mss, else 1460 (IPv4) or
+    1440 (IPv6). When both ends of a flow use timestamps (both_timestamp()),
+    data segments must leave 12 bytes for the option: compile Flowsynth
+    with flow_line(..., mss=1448), or this raises ValueError. Run it after
+    teardown() and before set_ip_fields().
     """
     profiles = {ip: stack_profile(v) for ip, v in stacks.items()}
     order = sorted(range(len(pkts)), key=lambda i: float(pkts[i].time))
@@ -536,7 +567,10 @@ def set_tcp_stack(pkts, stacks, rng, mss=None):
         src, dst = endpoints(p)
         when = float(p.time)
         if p[TCP].flags.S:
-            (synack_t if p[TCP].flags.A else syn_t).setdefault((src, dst), when)
+            if p[TCP].flags.A:
+                synack_t.setdefault((src, dst), when)
+            elif (dst, src) not in synack_t:
+                syn_t[(src, dst)] = when  # the last SYN, if one was resent
             prof = profiles.get(src[0])
             if prof:
                 names = prof["options"] if prof["ts"] else prof["options_nots"]
@@ -572,18 +606,27 @@ def set_tcp_stack(pkts, stacks, rng, mss=None):
         if (src, dst) not in tsval and prof:
             tsval[(src, dst)] = rng.randrange(1, 2**31)
             t0[(src, dst)] = float(p.time)
+        now = float(p.time)
         if not prof:
+            # keep a host left out of stacks' own timestamps, to echo them
+            ts = dict(p[TCP].options or []).get("Timestamp")
+            if ts:
+                seen.setdefault((src, dst), []).append((now, ts[0], _seq_end(p)))
             continue
         q = p.copy()
         tcp = q[TCP]
-        now = float(p.time)
         val = (tsval[(src, dst)] + int((now - t0[(src, dst)]) * 1000)) % SEQ_MOD
-        # echo the peer's latest timestamp that has reached this host: the
-        # far end sees the near end's packets about an RTT after capture
+        # echo the peer's latest timestamp that has reached this host: one
+        # on a segment this packet ACKs, or one captured long enough ago (the
+        # far end sees the near end's packets about an RTT after capture)
         cutoff = now - 0.9 * lag(src, dst)
-        echo = next(
-            (v for at, v in reversed(seen.get((dst, src), [])) if at <= cutoff), 0
-        )
+        peer = seen.get((dst, src), [])
+        echo = 0
+        for at, v, end in reversed(peer):
+            acked = end is not None and tcp.flags.A and _covers(tcp.ack, end)
+            if at <= cutoff or acked:
+                echo = v
+                break
         if tcp.flags.S:
             seg = next((o[1] for o in tcp.options or [] if o[0] == "MSS"), None)
             seg = seg or mss or (1440 if IPv6 in q else 1460)
@@ -604,12 +647,10 @@ def set_tcp_stack(pkts, stacks, rng, mss=None):
                 "EOL": None,
             }
             tcp.options = [(n, values[n]) for n in names]
-            if not tcp.flags.A:
-                tcp.window = prof["syn_window"]
-            elif ts_ok:
-                tcp.window = prof["synack_window"]
+            if tcp.flags.A:
+                tcp.window = synack_window(prof, ts_ok)
             else:
-                tcp.window = prof.get("synack_window_nots", prof["synack_window"])
+                tcp.window = prof["syn_window"]
         elif not tcp.flags.R:
             peer_mss = mss_of.get((dst, src)) or (1440 if IPv6 in q else 1460)
             data = len(bytes(tcp.payload))
@@ -630,7 +671,7 @@ def set_tcp_stack(pkts, stacks, rng, mss=None):
         else:
             tcp.options = []
         if prof["ts"]:
-            seen.setdefault((src, dst), []).append((now, val))
+            seen.setdefault((src, dst), []).append((now, val, _seq_end(p)))
         del tcp.dataofs
         out[i] = rebuild(q, p.time)
     return out
@@ -728,7 +769,9 @@ def tcp_session(
         both offer about `window` bytes."""
         host = client if side == ">" else server
         if syn and host.stack:
-            return host.stack["syn_window" if side == ">" else "synack_window"]
+            if side == ">":
+                return host.stack["syn_window"]
+            return synack_window(host.stack, both_timestamp(client.stack, host.stack))
         if syn:
             return min(host.window, 0xFFFF)  # a SYN's field isn't scaled
         return max(1, min(host.window >> wscale[side], 0xFFFF))

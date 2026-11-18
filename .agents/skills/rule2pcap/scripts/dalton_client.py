@@ -1010,8 +1010,8 @@ BIT_RE = re.compile(r"(?:^|[;(\s])(flowbits|xbits|hostbits)\s*:\s*(\w+)\s*,\s*([
 
 
 def bit_uses(rules_text):
-    """sid -> (bits the rule sets, bits it checks), from flowbits, xbits and
-    hostbits. A group like "a|b" or "a&b" counts each name."""
+    """sid -> (bits the rule sets or toggles, bits it checks), from
+    flowbits, xbits and hostbits. A group like "a|b" or "a&b" counts each name."""
     uses = {}
     for line in join_continuations(rules_text).splitlines():
         line = line.strip()
@@ -1027,7 +1027,8 @@ def bit_uses(rules_text):
             for n in re.split(r"[|&]", names):
                 if not n.strip():
                     continue
-                if command in ("set", "unset", "toggle"):
+                # unset only clears a bit: it can't stand in for a setter
+                if command in ("set", "toggle"):
                     sets.add((kind, n.strip()))
                 elif command in ("isset", "isnotset"):
                     checks.add((kind, n.strip()))
