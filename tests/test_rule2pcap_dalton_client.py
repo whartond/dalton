@@ -275,11 +275,13 @@ def test_ruleset_locations_maps_bind_mounts(monkeypatch):
         {
             "Name": "/dalton_controller",
             "Mounts": [
+                # a shallower mount the deeper one shadows
+                {"Type": "bind", "Source": "/srv/dalton", "Destination": "/opt/dalton"},
                 {
                     "Type": "bind",
                     "Source": "/home/u/dalton/rulesets",
                     "Destination": "/opt/dalton/rulesets",
-                }
+                },
             ],
         },
     ]
@@ -296,6 +298,52 @@ def test_ruleset_locations_maps_bind_mounts(monkeypatch):
         "host_dir": "/home/u/dalton/rulesets/suricata",
     }
     assert dc.ruleset_locations(["/elsewhere/et.rules"]) is None
+    # a named volume has no host directory to grep
+    inspect[1]["Mounts"][1] = {
+        "Type": "volume",
+        "Source": "/var/lib/docker/volumes/r/_data",
+        "Destination": "/opt/dalton/rulesets",
+    }
+    where = dc.ruleset_locations(["/opt/dalton/rulesets/suricata/et.rules"])
+    assert where == {"container": "dalton_controller", "host_dir": None}
+
+
+def test_failed_setter_blocks_the_rule_that_checks_its_bit():
+    rules = (
+        'alert tls any any -> any any (msg:"s"; tls.alpn; content:"h2"; '
+        "flowbits:set,r2p.x; flowbits:noalert; sid:100;)\n"
+        'alert tcp any any -> any any (msg:"t"; flowbits:isset,r2p.x; '
+        "flowbits:set,r2p.y; sid:101;)\n"
+        'alert tcp any any -> any any (msg:"u"; flowbits:isset,r2p.y|r2p.z; sid:102;)\n'
+        'alert tcp any any -> any any (msg:"flowbits:isset,r2p.x;"; sid:103;)\n'
+        'alert tcp any any -> any any (msg:"v"; xbits:set,q,track ip_src; sid:104;)\n'
+        'alert tcp any any -> any any (msg:"w"; xbits:isset,q,track ip_src; sid:105;)\n'
+        'alert tcp any any -> any any (msg:"x"; flowbits:set,r2p.x; sid:106;)\n'
+    )
+    # 101 and, through it, 102 depend on 100; the bit in 103's msg is text
+    assert dc.broken_by(["100"], rules.rsplit("\n", 2)[0]) >= {
+        "100",
+        "101",
+        "102",
+    }
+    assert "103" not in dc.broken_by(["100"], rules)
+    assert dc.broken_by(["104"], rules) == {"104", "105"}
+    # another rule (106) still sets r2p.x
+    assert dc.broken_by(["100"], rules) == {"100"}
+
+    def report():
+        line = 'E: detect: error parsing signature "alert tls ... sid:100;)"'
+        return {
+            "results": [{"tech": "suricata/7.0.17", "status": "done", "errors": line}]
+        }
+
+    lone = rules.split("\n")[0] + "\n" + rules.split("\n")[1]
+    r = report()
+    dc.mark_rule_errors(r, ["101"], lone)
+    assert r["not_loaded"] == ["suricata/7.0.17"] and r["rule_warnings"] == []
+    r = report()
+    dc.mark_rule_errors(r, ["103"], rules)
+    assert r["not_loaded"] == [] and "sid(s) 100" in r["rule_warnings"][0]
 
 
 def test_apply_sets_edits_nested_keys():

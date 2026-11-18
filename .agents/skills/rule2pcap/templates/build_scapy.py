@@ -40,6 +40,7 @@ SEED = 9000201  # the target sid: same seed, same bytes on every rebuild
 START = datetime.datetime(2024, 3, 12, 9, 15, 2, 410000, tzinfo=datetime.timezone.utc)
 
 rng = random.Random(SEED)
+RTT = (0.038, 0.055)  # internet round trip range, seconds
 
 # The capture point is on the victim's LAN: a remote host is seen through
 # the gateway's MAC, with a TTL that has dropped a few hops.
@@ -61,7 +62,9 @@ def build():
         messages = [(">", beacon(n)), ("<", b"R2P\x02\x00\x00")]
         # near="client": captured on the victim's LAN. Use near="server" for an
         # inbound connection to a local server.
-        session, _ = pk.tcp_session(t, victim, c2, sport + n, 4444, messages, rng)
+        session, _ = pk.tcp_session(
+            t, victim, c2, sport + n, 4444, messages, rng, rtt=RTT
+        )
         pkts += session
         t += 10 + rng.uniform(-0.5, 0.5)  # 10s sleep with jitter
     echo, _ = pk.icmp_echo(
@@ -72,6 +75,7 @@ def build():
         1,
         b"r2p-ping" + bytes(24),
         rng,
+        rtt=RTT,
     )
     pkts += echo
     pkts.sort(key=lambda p: float(p.time))

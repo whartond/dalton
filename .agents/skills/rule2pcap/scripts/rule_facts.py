@@ -923,8 +923,10 @@ def facts_for_text(text):
         rules.append(facts)
     result = {"rules": rules, "notes": cross_rule_notes(rules)}
     # the file's output directory is named for the rule the pcap must fire:
-    # a setter marked noalert only supports it
-    alerting = [r for r in rules if not is_noalert(r)] or rules
+    # a setter marked noalert, or a pass rule, only supports it
+    alerting = [
+        r for r in rules if not is_noalert(r) and r["action"] != "pass"
+    ] or rules
     if alerting:
         result["suggested_dir"] = alerting[0]["suggested_dir"]
     if len(alerting) > 1:

@@ -389,6 +389,8 @@ def test_set_tcp_stack_without_timestamps_on_one_side(tmp_path):
     ]
     # Linux answers a SYN without timestamps in its other option order
     assert [o[0] for o in synack.options] == pk.STACKS["linux"]["options_nots"]
+    # and offers a window that is a multiple of the full 1460-byte MSS
+    assert synack.window == 64240
     later = [p[TCP] for p in pkts[2:]]
     assert all(not t.options for t in later)
     assert {t.window for t in later if t.sport == 49152} == {513}
@@ -448,3 +450,82 @@ def test_teardown_with_remote_hosts_and_an_rtt_range():
     )
     fin, ack = wan[2], wan[3]
     assert 0.03 <= float(ack.time - fin.time) <= 0.05
+
+
+def test_set_tcp_stack_synack_offers_only_what_the_syn_did(tmp_path):
+    import random
+
+    from scapy.layers.inet import TCP
+
+    pk = pcapkit()
+    pkts = flowsynth_flow(tmp_path, pk)  # Flowsynth's SYN has no options
+    pkts = pk.set_tcp_stack(pkts, {"203.0.113.9": "linux"}, random.Random(1))
+    assert [o[0] for o in pkts[1][TCP].options] == ["MSS"]
+    pkts = pk.set_tcp_stack(
+        flowsynth_flow(tmp_path, pk), {"203.0.113.9": "macos"}, random.Random(1)
+    )
+    assert [o[0] for o in pkts[1][TCP].options] == ["MSS", "EOL"]
+
+
+def test_stack_with_timestamps_off_uses_its_other_option_order(tmp_path):
+    import random
+
+    from scapy.layers.inet import TCP
+
+    pk = pcapkit()
+    off = {"base": "linux", "ts": False}
+    stacks = {"10.0.0.5": off, "203.0.113.9": off}
+    pkts = pk.set_tcp_stack(flowsynth_flow(tmp_path, pk), stacks, random.Random(1))
+    for p in pkts[:2]:
+        assert [o[0] for o in p[TCP].options] == pk.STACKS["linux"]["options_nots"]
+    assert pkts[1][TCP].window == 64240
+
+
+def test_remote_host_echoes_timestamps_it_has_received(tmp_path):
+    import random
+
+    from scapy.layers.inet import TCP
+
+    pk = pcapkit()
+    rng = random.Random(3)
+    remote = {"203.0.113.9"}
+    pkts = flowsynth_flow(tmp_path, pk, mss=1448)
+    pk.restamp(
+        pkts,
+        1.7e9,
+        lambda p, new, earlier: pk.reply_gap(p, earlier, remote, rng),
+    )
+    stacks = {"10.0.0.5": "linux", "203.0.113.9": "linux"}
+    pkts = pk.set_tcp_stack(pkts, stacks, rng)
+    sent = {}  # client TSval -> capture time
+    for p in pkts:
+        ts = dict(p[TCP].options).get("Timestamp")
+        if p[TCP].sport == 49152:
+            sent.setdefault(ts[0], float(p.time))
+        elif ts and ts[1]:
+            # the echoed value left the client at least ~an RTT earlier
+            assert float(p.time) - sent[ts[1]] > 0.03
+
+
+def test_scapy_helpers_take_an_rtt_range():
+    import random
+
+    pk = pcapkit()
+    rng = random.Random(5)
+    a = pk.Host("192.168.1.5", "02:00:00:00:00:01", stack="windows")
+    b = pk.Host("203.0.113.9", "02:00:00:00:00:02", ttl=52, stack="linux")
+    pkts, _ = pk.tcp_session(
+        1.7e9, a, b, 50000, 80, [(">", b"hi"), ("<", b"yo")], rng, rtt=(0.03, 0.05)
+    )
+    gaps = [
+        float(q.time) - float(p.time)
+        for p, q in zip(pkts, pkts[1:], strict=False)
+        if q["IP"].src == b.ip and p["IP"].src == a.ip
+    ]
+    assert gaps and all(0.03 <= g <= 0.05 for g in gaps) and len(set(gaps)) > 1
+    (q, r), _ = pk.udp_exchange(
+        1.7e9, a, b, 5353, 53, b"q", b"r", rng, rtt=(0.03, 0.05)
+    )
+    assert 0.03 <= float(r.time) - float(q.time) <= 0.05
+    with pytest.raises(ValueError, match="needs rng"):
+        pk.icmp_echo(1.7e9, a, b, 1, 1, b"x", None, rtt=(0.03, 0.05))

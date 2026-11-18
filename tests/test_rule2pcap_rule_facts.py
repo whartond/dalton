@@ -424,3 +424,8 @@ def test_suggested_dir_for_a_file_is_the_rule_that_alerts():
     both = facts(target + "\n" + target.replace("sid:2", "sid:3"))
     assert both["suggested_dir"] == "2-target"
     assert "several-targets" in {n["code"] for n in both["notes"]}
+    # a pass rule doesn't alert either
+    allow = target.replace("alert http", "pass http").replace("sid:2", "sid:4")
+    result = facts(allow + "\n" + target)
+    assert result["suggested_dir"] == "2-target"
+    assert "several-targets" not in {n["code"] for n in result["notes"]}

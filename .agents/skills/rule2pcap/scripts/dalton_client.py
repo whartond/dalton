@@ -888,16 +888,21 @@ def ruleset_locations(paths):
     except (subprocess.SubprocessError, OSError, ValueError):
         return None
     folder = posixpath.dirname(paths[0])
+    best = None  # the deepest mount holding the folder: it shadows the others
     for c in info:
         for m in c.get("Mounts") or []:
             dest = (m.get("Destination") or "").rstrip("/")
             if not dest or not (folder == dest or folder.startswith(dest + "/")):
                 continue
+            if best and len(dest) <= len(best[1]):
+                continue
             host = None
             if m.get("Type") == "bind" and m.get("Source"):
                 host = m["Source"].rstrip("/") + folder[len(dest) :]
-            return {"container": c.get("Name", "").lstrip("/"), "host_dir": host}
-    return None
+            best = (c.get("Name", "").lstrip("/"), dest, host)
+    if best is None:
+        return None
+    return {"container": best[0], "host_dir": best[2]}
 
 
 def cmd_preflight(args):
@@ -955,7 +960,7 @@ def cmd_test(args):
         return 0
     report["expect"] = expect
     report["expect_absent"] = absent
-    mark_rule_errors(report, expect + absent)
+    mark_rule_errors(report, expect + absent, rules_text)
     loaded = [r for r in report["results"] if r["loaded"]]
     # An engine that can't load the rule (e.g. a keyword newer than that
     # version) says nothing about the pcap. Report it, judge the rest. An
@@ -1001,15 +1006,63 @@ def failed_sids(rule_errors):
     return sids if tied else None
 
 
-def mark_rule_errors(report, sids=None):
+BIT_RE = re.compile(r"(?:^|[;(\s])(flowbits|xbits|hostbits)\s*:\s*(\w+)\s*,\s*([^;,]+)")
+
+
+def bit_uses(rules_text):
+    """sid -> (bits the rule sets, bits it checks), from flowbits, xbits and
+    hostbits. A group like "a|b" or "a&b" counts each name."""
+    uses = {}
+    for line in join_continuations(rules_text).splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        options = re.sub(r'"(?:\\.|[^"\\])*"', '""', line)
+        m = re.search(r"(?:^|[;(\s])sid\s*:\s*(\d+)\s*;", options)
+        if not m:
+            continue
+        sets, checks = set(), set()
+        for kind, command, names in BIT_RE.findall(options):
+            kind = "flowbits" if kind == "flowbits" else "hostbits"  # xbits share
+            for n in re.split(r"[|&]", names):
+                if not n.strip():
+                    continue
+                if command in ("set", "unset", "toggle"):
+                    sets.add((kind, n.strip()))
+                elif command in ("isset", "isnotset"):
+                    checks.add((kind, n.strip()))
+        uses[m.group(1)] = (sets, checks)
+    return uses
+
+
+def broken_by(failed, rules_text):
+    """The failed sids plus every rule that checks a bit only they set,
+    directly or through a chain: those rules can't behave as the pcap
+    intends on that engine."""
+    uses = bit_uses(rules_text)
+    broken = set(failed)
+    while True:
+        lost = set().union(*(uses.get(s, (set(), set()))[0] for s in broken))
+        # a bit another working rule still sets isn't lost
+        kept = set().union(*(u[0] for sid, u in uses.items() if sid not in broken))
+        lost -= kept
+        more = {sid for sid, u in uses.items() if sid not in broken and u[1] & lost}
+        if not more:
+            return broken
+        broken |= more
+
+
+def mark_rule_errors(report, sids=None, rules_text=""):
     """Add rule_errors, failed_sids and loaded to each result, and list the
     engines that rejected the rules (not_loaded) and the ones that didn't
     run the pcap (not_run: timed out, interrupted, crashed, or the engine
     stopped on an error such as a bad config; nothing is known about them).
 
-    With sids, an engine counts as not loaded only if one of those sids, or
-    a rule error that can't be tied to a sid, is among its failures; other
-    rules that failed are listed in rule_warnings and the engine is judged."""
+    With sids, an engine counts as not loaded only if one of those sids, a
+    rule error that can't be tied to a sid, or a setter whose flowbit,
+    xbit or hostbit one of those sids checks (read from rules_text), is
+    among its failures; other rules that failed are listed in rule_warnings
+    and the engine is judged."""
     report["rule_warnings"] = []
     name = lambda r: r["tech"] or r.get("image")  # noqa: E731
     for result in report["results"]:
@@ -1018,7 +1071,8 @@ def mark_rule_errors(report, sids=None):
         result["failed_sids"] = failed_sids(result["rule_errors"])
         blocking = bool(result["rule_errors"])
         if blocking and sids is not None and result["failed_sids"] is not None:
-            blocking = bool(set(result["failed_sids"]) & set(sids))
+            broken = broken_by(result["failed_sids"], rules_text)
+            blocking = bool(broken & set(sids))
             if not blocking:
                 report["rule_warnings"].append(
                     f"{name(result)} rejected or skipped sid(s) "

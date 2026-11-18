@@ -250,9 +250,11 @@ $VENV/bin/python $SKILL/scripts/dalton_client.py test --pcap <name>.pcap --rules
 - **Engines that can't load the rule:** `not_loaded` lists them, typically
   older versions without a keyword the rule uses. Their `expected_fired`
   is null and they don't count against the pass. Report them as "needs
-  Suricata N or later", not as failures. Only an expected sid failing to
-  load puts an engine there; another rule that fails (a stand-in, say) is
-  listed in `rule_warnings`, and the engine is still judged.
+  Suricata N or later", not as failures. An engine goes there when an
+  expected sid fails to load, or a setter it depends on (a flowbit, xbit
+  or hostbit it checks) does. Another rule that fails, such as an unrelated
+  rule in the same file, is listed in `rule_warnings`, and the engine is
+  still judged.
 - **Engines that didn't run:** `not_run` lists engines that never read the
   pcap: the job timed out, was interrupted or crashed, or the engine
   stopped on an error. Nothing is known about them, so the test fails with
