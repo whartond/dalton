@@ -273,7 +273,9 @@ $VENV/bin/python $SKILL/scripts/dalton_client.py test --pcap <name>.pcap --rules
 - **Prod ruleset:** optionally, run again with `--prod-ruleset <path from
   preflight>`. Hits from other vendors' rules for the same threat
   corroborate the traffic; a flood of unrelated hits suggests something
-  odd.
+  odd. If the target sid is also in the prod ruleset at the same rev, the
+  engine keeps the prod copy and `rule_warnings` says so; bump `rev` in
+  test.rules to test yours.
 
 ## 6. Iterate
 

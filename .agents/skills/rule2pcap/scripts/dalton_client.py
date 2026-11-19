@@ -795,6 +795,29 @@ PCAP_READ_RE = re.compile(
 SKIPPED_RE = re.compile(r"Skipping signature due to missing requirements")
 
 
+DUPLICATE_RE = re.compile(r'Duplicate signature "(.*)"')
+
+
+def drop_duplicates(rule_errors):
+    """Split out duplicate rules: (other errors, sids loaded twice). The
+    engine keeps the copy it loaded first, so a duplicate is still loaded
+    (e.g. a rule that's also in the prod ruleset). Each duplicate gives a
+    "Duplicate signature" line and an "error parsing signature" line."""
+    texts = {m.group(1) for x in rule_errors if (m := DUPLICATE_RE.search(x))}
+    if not texts:
+        return rule_errors, []
+    kept, sids = [], []
+    for line in rule_errors:
+        rule = next((t for t in texts if f'"{t}"' in line), None)
+        if rule is None:
+            kept.append(line)
+            continue
+        m = re.search(r"\bsid\s*:\s*(\d+)", rule)
+        if m and m.group(1) not in sids:
+            sids.append(m.group(1))
+    return kept, sids
+
+
 def is_rule_problem(line):
     """A rule the engine rejected (an error) or skipped (unmet requires:)."""
     return bool(RULE_ERROR_RE.search(line) or SKIPPED_RE.search(line))
@@ -951,6 +974,7 @@ def cmd_test(args):
     expect = [str(s) for s in args.expect_sid] or [
         s for s in alerting_sids(rules_text) if s not in absent
     ]
+    expect = list(dict.fromkeys(expect))  # a sid given twice is checked once
     if args.runner == "docker":
         report = run_docker(args, rules_text, expect)
     else:
@@ -1073,7 +1097,14 @@ def mark_rule_errors(report, sids=None, rules_text=""):
     name = lambda r: r["tech"] or r.get("image")  # noqa: E731
     for result in report["results"]:
         lines = [x.strip() for x in (result.get("errors") or "").splitlines()]
-        result["rule_errors"] = [x for x in lines if is_rule_problem(x)]
+        errors, twice = drop_duplicates([x for x in lines if is_rule_problem(x)])
+        if twice:
+            report["rule_warnings"].append(
+                f"{name(result)} loaded sid(s) {', '.join(twice)} twice and "
+                "kept the first copy, e.g. the prod ruleset's: that copy is "
+                "what was tested. Bump rev in test.rules to test yours"
+            )
+        result["rule_errors"] = errors
         result["failed_sids"] = failed_sids(result["rule_errors"])
         blocking = bool(result["rule_errors"])
         if blocking and sids is not None and result["failed_sids"] is not None:

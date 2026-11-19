@@ -851,3 +851,25 @@ def test_expect_absent(dalton, files, capsys):
     # and one on a sid that doesn't fire passes, alongside the default expect
     code, report = run(capsys, base + ["--expect-absent", "4242"])
     assert code == 0 and report["pass"] is True and report["expect"] == ["1000001"]
+
+
+def test_duplicate_rule_is_loaded_not_failed():
+    rule = 'alert http any any -> any any (msg:"x"; content:"GET"; sid:777; rev:1;)'
+    errors = (
+        f'E: detect-parse: Duplicate signature "{rule}"\n'
+        f'E: detect: error parsing signature "{rule}" from file /w/r.rules at line 2\n'
+    )
+    report = {
+        "results": [{"tech": "suricata/8.0.6", "status": "done", "errors": errors}]
+    }
+    dc.mark_rule_errors(report, ["777"], rule + "\n" + rule)
+    (r,) = report["results"]
+    assert r["loaded"] and r["rule_errors"] == [] and report["not_loaded"] == []
+    assert "sid(s) 777 twice" in report["rule_warnings"][0]
+    # another rule's real error is still reported
+    bad = 'alert tcp any any -> any any (msg:"y"; nope; sid:8;)'
+    report["results"][0]["errors"] = (
+        errors + f'E: detect: error parsing signature "{bad}" from file x at line 3\n'
+    )
+    dc.mark_rule_errors(report, ["8"], rule + "\n" + bad)
+    assert report["not_loaded"] == ["suricata/8.0.6"]
